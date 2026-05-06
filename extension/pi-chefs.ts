@@ -49,6 +49,12 @@ import {
   type ConsultReplyWatcherCloser,
 } from "../dist/consult.js";
 import { listChefs, loadChef, type ResolvedChef } from "../dist/registry.js";
+import {
+  CreateChefAlreadyExistsError,
+  CreateChefValidationError,
+  createChef,
+  detectInstalledSkills,
+} from "../dist/create-chef.js";
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -385,6 +391,144 @@ export default function (pi: ExtensionAPI) {
         if (err instanceof AmqMissingError) return toolError(err.message);
         return toolError(`consult failed: ${(err as Error).message}`);
       }
+    },
+  });
+
+  // ──────────── chef_create: agent-driven chef materialization ────────────
+  pi.registerTool({
+    name: "chef_create",
+    label: "Chefs: Create",
+    description:
+      "Create a new chef registry entry and persona file. Use this when no existing chef covers a domain the user wants — negotiate name + domain + persona with the user, then call this tool to materialize it. After creation, run `chef_spawn` to launch it. Detects skills already installed under ~/.pi/agent/skills/ and surfaces them so you can suggest which to allow. PREVIEW the proposed chef config (especially name + description + domain) to the user before calling this tool. Refuses to overwrite by default; pass force: true if the user explicitly approves replacing an existing chef.",
+    parameters: Type.Object({
+      name: Type.String({
+        description:
+          "Chef name, lowercase, [a-z0-9_-]+. Becomes the registry filename. Convention: <domain>-chef or chef-<domain> (e.g. observe-chef, chef-rails).",
+      }),
+      handle: Type.Optional(
+        Type.String({
+          description: "AMQ handle. Defaults to the name. Must match [a-z0-9_-]+.",
+        }),
+      ),
+      description: Type.String({
+        description:
+          "One-line summary surfaced in `consult_list` and `pi-chefs list`. E.g. 'Observability expert: logs, metrics, traces, errors.'",
+      }),
+      domain: Type.String({
+        description:
+          "Multi-line description of what's in scope and what isn't. The chef's persona reads this. Be specific. Include: 'Use me for X, Y, Z. Don't ask me about A or B — those belong to <other-chef>.'",
+      }),
+      persona: Type.Optional(
+        Type.String({
+          description:
+            "Optional full persona Markdown. If omitted, a stub is auto-generated from the domain. Override only if the user wants something custom; the stub usually suffices.",
+        }),
+      ),
+      skills_allowed: Type.Optional(
+        Type.Array(Type.String(), {
+          description:
+            "Skill names from ~/.pi/agent/skills/ (e.g. ['data-portal', 'pi-postman']) or absolute paths. Empty array is fine — most chefs rely on Pi's auto-loaded extensions, not skills. Skills_allowed is enforced via Pi's --no-skills + --skill <abs-path> at spawn time.",
+        }),
+      ),
+      tools_allowed: Type.Optional(
+        Type.Array(Type.String(), {
+          description:
+            "Tool allowlist. Advisory in v0.6+; not enforced at spawn time (chef gets all extension + builtin tools). Retained for grep-ability. Pass [] or omit.",
+        }),
+      ),
+      cwd: Type.Optional(
+        Type.String({
+          description: "Chef session cwd. Defaults to ~. Use ~/path or absolute path.",
+        }),
+      ),
+      timeout_seconds: Type.Optional(
+        Type.Number({
+          description: "Consult timeout in seconds. Defaults to 300.",
+        }),
+      ),
+      force: Type.Optional(
+        Type.Boolean({
+          description:
+            "Overwrite an existing chef with the same name. Default false. Only set after the user explicitly approves replacement.",
+        }),
+      ),
+    }),
+    async execute(_id, params) {
+      try {
+        const result = createChef({
+          name: params.name,
+          handle: params.handle,
+          description: params.description,
+          domain: params.domain,
+          persona: params.persona,
+          skills_allowed: params.skills_allowed,
+          tools_allowed: params.tools_allowed,
+          cwd: params.cwd,
+          timeout_seconds: params.timeout_seconds,
+          force: params.force,
+        });
+        const lines = [
+          `✅ Chef "${params.name}" ${result.overwrote ? "replaced" : "created"}.`,
+          `   registry: ${result.registry_path}`,
+          `   persona:  ${result.persona_path}`,
+          "",
+          `Spawn it with: chef_spawn name="${params.name}"`,
+          `Or from a shell: pi-chefs spawn ${params.name}`,
+          "",
+          `Detected skills available on this machine (${detectInstalledSkills().length}): ${detectInstalledSkills().join(", ") || "(none)"}`,
+        ];
+        return toolOk(lines.join("\n"));
+      } catch (err) {
+        if (err instanceof CreateChefValidationError) {
+          return toolError(err.message);
+        }
+        if (err instanceof CreateChefAlreadyExistsError) {
+          return toolError(
+            `${err.message}\n\nIf the user wants to replace it, call chef_create again with force: true.`,
+          );
+        }
+        return toolError(`chef_create failed: ${(err as Error).message}`);
+      }
+    },
+  });
+
+  // ──────────── chef_spawn: agent-driven chef launch ────────────
+  //
+  // We can't actually spawn a Pi session from inside another Pi session
+  // (no AppleScript/tmux orchestration in v1; that risks fragility across
+  // user setups). Instead we print the exact command for the user to run.
+  // The user copy-pastes once. Future: if Pi adds a 'launch sibling tab'
+  // primitive, switch to that.
+  pi.registerTool({
+    name: "chef_spawn",
+    label: "Chefs: Spawn",
+    description:
+      "Show the user the command to spawn a chef in a new terminal tab. The chef must already exist (run chef_create first if not). Returns the exact `pi-chefs spawn <name>` command line, including any PI_CHEFS_PI_BIN env override the user has set. The user copy-pastes once and the chef boots; pi-chefs cannot launch a sibling Pi session from inside this one.",
+    parameters: Type.Object({
+      name: Type.String({
+        description: "Chef name (must already exist in the registry).",
+      }),
+    }),
+    async execute(_id, params) {
+      let chef: ResolvedChef;
+      try {
+        chef = loadChef(params.name);
+      } catch (err) {
+        return toolError(`chef_spawn: ${(err as Error).message}`);
+      }
+      const piBin = process.env.PI_CHEFS_PI_BIN;
+      const prefix = piBin ? `PI_CHEFS_PI_BIN="${piBin}" ` : "";
+      const lines = [
+        `Run this in a new terminal tab to spawn ${chef.name}:`,
+        "",
+        `  ${prefix}pi-chefs spawn ${chef.name}`,
+        "",
+        `Once it's running, you can immediately consult it with:`,
+        `  consult chef="${chef.name}" subject="..." question="..."`,
+        "",
+        `(The chef sits at handle "${chef.handle}" with cwd ${chef.resolved_cwd}.)`,
+      ];
+      return toolOk(lines.join("\n"));
     },
   });
 }

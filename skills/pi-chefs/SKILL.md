@@ -14,8 +14,16 @@ When the user asks a domain-shaped question (data, infrastructure, performance, 
 Do not reach for `data_portal_*`, `bigquery_*`, or any other domain tool *before* checking `consult_list`. Skip the chef only when:
 
 - The question is generic and not domain-shaped ("what does this regex match?", "refactor this loop").
-- No chef covers the domain (you checked `consult_list` and there's no fit).
 - The user explicitly tells you to investigate yourself ("don't consult, just look it up").
+
+### When no chef covers the domain
+
+If `consult_list` doesn't show a chef for the user's domain, you have two options:
+
+1. **Offer to create one.** Use `chef_create` to materialize a new chef for the domain. Negotiate the name + description + domain with the user, preview it, then call `chef_create`. Follow up with `chef_spawn` to give them the launch command. This is the right move when the user is going to keep asking questions in this domain (one-off questions don't justify a chef).
+2. **Investigate yourself.** Cheaper for one-shot questions where standing up a chef is overkill.
+
+Favor option 1 when the user mentions a domain repeatedly or says things like "I want a chef for X" or "build me a chef for Y."
 
 ## When to use
 
@@ -24,6 +32,7 @@ Do not reach for `data_portal_*`, `bigquery_*`, or any other domain tool *before
 - The question requires a skill or toolchain you don't currently have loaded.
 - The investigation will involve many tool calls, but the answer fits in a paragraph.
 - You need a domain-specific lookup (a table name, a convention, a precedent) without taking on the full domain skillset.
+- The user explicitly says "create a chef for X" — use `chef_create`.
 
 **No:**
 - You can answer in 1-2 turns with truly generic tools (read, edit a single file, look up a regex).
@@ -60,3 +69,30 @@ You tell the user: *"I've asked chef-rails for the canonical pattern. Reply inco
 Turn 2 — the chef's reply lands. You see an injected user message: "📬 Reply from chef-rails..." with the canonical pattern + example. You correlate by thread id, summarize for the user, and continue.
 
 (Notice: no "approve to send?" prompt, no blocking wait. The consult tool fires, returns, and the reply arrives later as a fresh turn.)
+
+## Example: creating a chef on demand
+
+User: "I want a chef for observe-related stuff (logs, metrics, traces)."
+
+You: (call `consult_list`, see no observe chef. Auto-detect available skills. Propose a chef.)
+
+> No chef covers observability yet. I can create one. Here's what I'd propose:
+>
+> **Name:** observe-chef
+> **Handle:** observe-chef
+> **Description:** Observability expert: logs, metrics, traces, errors, PromQL queries via Shopify's Observe platform.
+> **Domain:**
+> > I'm the observability chef. Use me for everything in Shopify's Observe stack: logs (component=platform, http_request_finish), metrics (PromQL via observe_instant_query / observe_range_query), errors (observe_error_groups), traces (observe_trace by trace_id), saved queries, datasets, dashboards, service health investigations.
+> >
+> > Don't ask me about: BigQuery / Data Portal (that's data-chef), code review, or product strategy.
+> **Skills allowed:** none (the `observe` extension is a Pi extension, not a skill, so it auto-loads in any session.)
+>
+> Approve to create?
+
+User: "yes"
+
+You: (call `chef_create` with the proposed config, then call `chef_spawn` to surface the launch command.)
+
+> Created. Run `PI_CHEFS_PI_BIN="devx pi" pi-chefs spawn observe-chef` in a new tab. Once it's up, ask me anything observability-related and I'll route it to observe-chef.
+
+(The negotiation is the whole point: the user describes the domain in plain language, you turn it into a registry entry. The wizard CLI is a fallback for users without a Pi session running.)

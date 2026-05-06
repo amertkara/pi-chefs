@@ -14,6 +14,7 @@ import { createInterface, type Interface as Readline } from "node:readline/promi
 import { stdin, stdout } from "node:process";
 import { stringify as yamlStringify } from "yaml";
 import { callerConfigFile, userPersonasDir, userRegistryDir } from "./paths.ts";
+import { createChef, CreateChefAlreadyExistsError } from "./create-chef.ts";
 
 const HANDLE_RE = /^[a-z0-9_-]+$/;
 // Pi's built-in core tools — always available regardless of extension setup.
@@ -237,6 +238,7 @@ export async function runWizard(): Promise<void> {
     const registryPath = join(userRegistryDir(), `${name}.yaml`);
     const personaPath = join(userPersonasDir(), `${name}.md`);
 
+    let force = false;
     if (existsSync(registryPath)) {
       const overwrite = await askYesNo(
         rl,
@@ -247,6 +249,7 @@ export async function runWizard(): Promise<void> {
         console.log("Aborted.");
         return;
       }
+      force = true;
     }
 
     const confirm = await askYesNo(
@@ -259,31 +262,34 @@ export async function runWizard(): Promise<void> {
       return;
     }
 
-    mkdirSync(userRegistryDir(), { recursive: true });
-    mkdirSync(userPersonasDir(), { recursive: true });
-
-    const yaml = yamlStringify({
-      name: answers.name,
-      handle: answers.handle,
-      description: answers.description,
-      domain: answers.domain || `(no domain specified yet — edit ${registryPath})`,
-      persona_file: `${name}.md`,
-      skills_allowed: answers.skills_allowed,
-      tools_allowed: answers.tools_allowed,
-      cwd: answers.cwd,
-      timeout_seconds: answers.timeout_seconds,
-    });
-    writeFileSync(registryPath, yaml);
-    writeFileSync(personaPath, buildPersonaStub(answers));
-
-    console.log("");
-    console.log(`✓ Wrote ${registryPath}`);
-    console.log(`✓ Wrote ${personaPath}`);
-    console.log("");
-    console.log("Edit the persona file to define how this chef behaves.");
-    console.log("");
-    console.log("Next:");
-    console.log(`  pi-chefs spawn ${name}`);
+    try {
+      const result = createChef({
+        name: answers.name,
+        handle: answers.handle,
+        description: answers.description,
+        domain: answers.domain || `(no domain specified yet — edit ${registryPath})`,
+        skills_allowed: answers.skills_allowed,
+        tools_allowed: answers.tools_allowed,
+        cwd: answers.cwd,
+        timeout_seconds: answers.timeout_seconds,
+        force,
+      });
+      console.log("");
+      console.log(`✓ Wrote ${result.registry_path}`);
+      console.log(`✓ Wrote ${result.persona_path}`);
+      console.log("");
+      console.log("Edit the persona file to define how this chef behaves.");
+      console.log("");
+      console.log("Next:");
+      console.log(`  pi-chefs spawn ${name}`);
+    } catch (err) {
+      if (err instanceof CreateChefAlreadyExistsError) {
+        console.error(`\nAborted: ${err.message}`);
+      } else {
+        console.error(`\nFailed: ${(err as Error).message}`);
+      }
+      return;
+    }
   } finally {
     rl.close();
   }
