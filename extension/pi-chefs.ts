@@ -37,12 +37,16 @@ import type {
   ExtensionContext,
 } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
+// Extension is loaded by Pi (via jiti) which handles TS itself, but the same
+// source modules are also imported by the Node-executed CLI. Both go through
+// the compiled dist/ output (with .d.ts alongside) so we have one source of
+// truth and don't have to rely on jiti to walk into our own src/.
 import {
   AmqMissingError,
   ConsultTimeoutError,
   consult as consultPrimitive,
-} from "../src/consult.ts";
-import { listChefs, loadChef, type ResolvedChef } from "../src/registry.ts";
+} from "../dist/consult.js";
+import { listChefs, loadChef, type ResolvedChef } from "../dist/registry.js";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Helpers

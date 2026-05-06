@@ -1,6 +1,6 @@
 {
   "name": "pi-chefs",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Long-running expert Pi sessions (chefs) that other agents consult via pi-postman. Persona + skill-allowlist layer on top of pi-postman.",
   "type": "module",
   "license": "MIT",
@@ -25,6 +25,7 @@
   "files": [
     "bin/**",
     "extension/**",
+    "dist/**",
     "src/**",
     "skills/**",
     "assets/**",
@@ -44,7 +45,9 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "pnpm build"
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*"

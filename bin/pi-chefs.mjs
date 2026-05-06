@@ -40,12 +40,13 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve as pathResolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = pathResolve(HERE, "..");
-const SRC_REGISTRY = join(REPO_ROOT, "src", "registry.ts");
-const SRC_PATHS = join(REPO_ROOT, "src", "paths.ts");
+const SRC_REGISTRY = pathToFileURL(join(REPO_ROOT, "dist", "registry.js")).href;
+const SRC_PATHS = pathToFileURL(join(REPO_ROOT, "dist", "paths.js")).href;
+const SRC_WIZARD = pathToFileURL(join(REPO_ROOT, "dist", "wizard.js")).href;
 // Resolve the pi-postman extension path. Order:
 //   1. PI_POSTMAN_PATH env (manual override, useful for dev).
 //   2. Sibling node_modules dir (npm-global install: lib/node_modules/pi-postman).
@@ -72,16 +73,18 @@ const SKILL_LINK = join(PI_SKILLS_DIR, "pi-chefs");
 // without remembering the flag.
 // ──────────────────────────────────────────────────────────────────────────────
 
-if (!process.execArgv.some((a) => a.includes("strip-types"))) {
-  const result = spawn(
-    process.execPath,
-    ["--experimental-strip-types", "--no-warnings", import.meta.filename, ...process.argv.slice(2)],
-    { stdio: "inherit" },
+// The CLI imports compiled JS from dist/ rather than walking into src/ at
+// runtime. Node's --experimental-strip-types refuses to strip TS files inside
+// node_modules, so an installed package needs real .js. tsc emits dist/ at
+// build time (pnpm build); the published tarball ships dist/ ready to run.
+if (!existsSync(join(REPO_ROOT, "dist", "registry.js"))) {
+  console.error(
+    `pi-chefs: dist/ not built. If you cloned for development, run \`pnpm build\`. If you installed via npm, this is a packaging bug — please file an issue.`,
   );
-  result.on("exit", (code) => process.exit(code ?? 0));
-} else {
-  await main();
+  process.exit(1);
 }
+
+await main();
 
 async function main() {
   const [, , subcommand, ...rest] = process.argv;
@@ -144,7 +147,7 @@ Env:
 }
 
 async function cmdInit() {
-  const { runWizard } = await import(join(REPO_ROOT, "src", "wizard.ts"));
+  const { runWizard } = await import(SRC_WIZARD);
   await runWizard();
 }
 
