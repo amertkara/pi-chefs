@@ -52,6 +52,12 @@ jobs:
           corepack enable
           pnpm install --frozen-lockfile
 
+      - name: Build
+        # Compiles src/ to dist/. Must run before typecheck because
+        # extension/pi-chefs.ts imports from ../dist/*.js and the typecheck
+        # walks every TS file in the project (including the extension).
+        run: pnpm build
+
       - name: Typecheck
         run: pnpm typecheck
 
