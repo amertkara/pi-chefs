@@ -209,6 +209,7 @@ pi-chefs stop <name>         # SIGTERM the chef session
 | `PI_CHEFS_HANDLE` | — | Chef handle; set automatically by `spawn` |
 | `PI_CHEFS_MEMORY_DIR` | `<home>/memory/<name>/` | Per-chef scratch dir, mounted into chef sessions |
 | `PI_POSTMAN_PATH` | auto-resolved | Where `pi-chefs spawn` finds pi-postman |
+| `PI_CHEFS_PI_BIN` | `pi` | Launcher binary for chef sessions. Can include args (e.g. `PI_CHEFS_PI_BIN="my-pi-wrapper run"`), or an absolute path to a `pi` binary. |
 
 ## Tools
 

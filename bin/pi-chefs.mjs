@@ -27,7 +27,7 @@
  *   - Write a PID file so `pi-chefs status` and `pi-chefs stop` can find it
  */
 
-import { spawn } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import {
   existsSync,
   lstatSync,
@@ -48,13 +48,35 @@ const SRC_REGISTRY = pathToFileURL(join(REPO_ROOT, "dist", "registry.js")).href;
 const SRC_PATHS = pathToFileURL(join(REPO_ROOT, "dist", "paths.js")).href;
 const SRC_WIZARD = pathToFileURL(join(REPO_ROOT, "dist", "wizard.js")).href;
 // Resolve the pi-postman extension path. Order:
-//   1. PI_POSTMAN_PATH env (manual override, useful for dev).
-//   2. Sibling node_modules dir (npm-global install: lib/node_modules/pi-postman).
+//   1. PI_POSTMAN_PATH env (manual override; useful for dev clones).
+//   2. `pi-postman` binary on $PATH — invoke `pi-postman extension-path` to
+//      ask pi-postman where its bundled extension lives. This works for any
+//      install layout (npm-global, pnpm-global virtual store, yarn link, etc.)
+//      because we delegate path resolution to pi-postman itself.
 //   3. Sibling repo dir (dev clone: ../pi-postman next to ../pi-chefs).
+//   4. Adjacent node_modules dir (flat npm install: ../node_modules/pi-postman).
 function resolvePostmanPath() {
   if (process.env.PI_POSTMAN_PATH) return process.env.PI_POSTMAN_PATH;
+
+  // Ask the pi-postman CLI directly. This handles pnpm's content-addressable
+  // virtual store layout where ../pi-postman doesn't resolve to anything.
+  try {
+    const out = execSync("pi-postman extension-path", {
+      stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf8",
+    }).trim();
+    if (out && existsSync(out)) return out;
+  } catch {
+    // pi-postman not on PATH — fall through to filesystem heuristics.
+  }
+
   const candidates = [
+    // Dev clone next to pi-chefs source.
     pathResolve(REPO_ROOT, "..", "pi-postman", "extension", "pi-postman.ts"),
+    // Flat npm install (lib/node_modules/pi-chefs/ and lib/node_modules/pi-postman/).
+    pathResolve(REPO_ROOT, "..", "node_modules", "pi-postman", "extension", "pi-postman.ts"),
+    // Nested install (pi-chefs has pi-postman as its own dep).
+    pathResolve(REPO_ROOT, "node_modules", "pi-postman", "extension", "pi-postman.ts"),
   ];
   for (const c of candidates) {
     if (existsSync(c)) return c;
@@ -142,7 +164,9 @@ Usage:
 
 Env:
   PI_CHEFS_HOME      Override default ~/.pi/chefs/ root
-  PI_POSTMAN_PATH    Path to pi-postman extension (default: ../pi-postman)
+  PI_CHEFS_PI_BIN    Launcher to use for chef sessions (default: pi).
+                     Can be a binary plus args, e.g. PI_CHEFS_PI_BIN="devx pi".
+  PI_POSTMAN_PATH    Path to pi-postman extension (default: auto-resolved)
 `);
 }
 
@@ -195,6 +219,20 @@ async function cmdStatus(name) {
   }
 }
 
+/**
+ * Resolve the launcher command used to spawn a chef Pi session.
+ *
+ * Default: bare `pi`. Override via PI_CHEFS_PI_BIN, which can be a single
+ * binary name (`devx`), an absolute path, or a binary plus prefix args
+ * (e.g. PI_CHEFS_PI_BIN="devx pi" produces `devx pi --extension ...`).
+ */
+function resolvePiCommand() {
+  const raw = process.env.PI_CHEFS_PI_BIN?.trim();
+  if (!raw) return { bin: "pi", prefixArgs: [] };
+  const parts = raw.split(/\s+/).filter(Boolean);
+  return { bin: parts[0], prefixArgs: parts.slice(1) };
+}
+
 async function cmdSpawn(args) {
   const dryRun = args.includes("--dry-run");
   const name = args.find((a) => !a.startsWith("--"));
@@ -202,6 +240,7 @@ async function cmdSpawn(args) {
     console.error("pi-chefs spawn: chef name required");
     process.exit(2);
   }
+  const piCommand = resolvePiCommand();
   const { loadChef, readPersona } = await import(SRC_REGISTRY);
   const { memoryDir, runtimeDir, pidFile, spawnMetaFile } = await import(SRC_PATHS);
 
@@ -262,7 +301,7 @@ async function cmdSpawn(args) {
     console.log(`  skills_allowed: ${chef.skills_allowed.join(", ") || "(none)"}`);
     console.log(`  tools_allowed:  ${chef.tools_allowed.join(", ") || "(none)"}`);
     console.log("");
-    console.log(`  command:        pi ${piArgs.map(quote).join(" ")}`);
+    console.log(`  command:        ${piCommand.bin} ${[...piCommand.prefixArgs, ...piArgs].map(quote).join(" ")}`);
     console.log("");
     console.log(`  env additions:`);
     for (const [k, v] of Object.entries(env)) {
@@ -277,7 +316,8 @@ async function cmdSpawn(args) {
   }
 
   console.log(`Spawning ${chef.name} (handle: ${chef.handle}, cwd: ${chef.resolved_cwd}) ...`);
-  const child = spawn("pi", piArgs, {
+  console.log(`Using launcher: ${piCommand.bin}${piCommand.prefixArgs.length ? ` ${piCommand.prefixArgs.join(" ")}` : ""}`);
+  const child = spawn(piCommand.bin, [...piCommand.prefixArgs, ...piArgs], {
     cwd: chef.resolved_cwd,
     env,
     stdio: "inherit",
