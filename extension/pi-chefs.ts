@@ -99,7 +99,10 @@ function isDisciplineAllowedTool(toolName: string): boolean {
   if (DISCIPLINE_ALLOWED_BUILTINS.has(toolName)) return true;
   if (toolName.startsWith("postman_")) return true;
   if (toolName.startsWith("consult")) return true;
-  if (toolName === "chef_info") return true;
+  // All chef_* are framework tools (chef_info, chef_create, chef_spawn).
+  // They're how Pi materializes and inspects chefs from inside a session;
+  // blocking them defeats the agent-driven creation flow.
+  if (toolName.startsWith("chef_")) return true;
   return false;
 }
 
