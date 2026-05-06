@@ -282,26 +282,16 @@ async function cmdCaller(args) {
     piArgs.push("--skill", resolved);
   }
 
-  // Same framework-tool augmentation as `spawn` — see comment there. Without
-  // this, --tools strips consult / postman_* and the caller can't issue
-  // consults at all.
-  if (config.tools_allowed.length > 0) {
-    const FRAMEWORK_TOOLS_CALLER = [
-      "postman_send",
-      "postman_inbox",
-      "postman_read",
-      "postman_reply",
-      "postman_sessions",
-      "postman_thread",
-      "consult",
-      "consult_list",
-      "chef_info",
-    ];
-    const merged = Array.from(
-      new Set([...config.tools_allowed, ...FRAMEWORK_TOOLS_CALLER]),
-    );
-    piArgs.push("--tools", merged.join(","));
-  }
+  // No --tools flag for callers either. Discipline is in:
+  //   1. --no-skills + explicit --skill on the caller-side allowlist.
+  //   2. PI_CHEFS_DISCIPLINE runtime blocker (set the env var and the
+  //      extension intercepts non-framework tool calls at call time).
+  // The runtime blocker is more nuanced than --tools: it knows about
+  // framework tools, can pattern-match (postman_*, consult*), and surfaces
+  // a useful 'use consult_list instead' reason. --tools is a hammer.
+  //
+  // tools_allowed in caller.yaml is now advisory — retained for users who
+  // want to grep their config but no longer enforced at spawn time.
 
   if (dryRun) {
     console.log("pi-chefs caller --dry-run: resolved config");
@@ -467,29 +457,21 @@ async function cmdSpawn(args) {
     // beyond what its persona declares. This keeps the spawn deterministic.
     piArgs.push("--no-skills");
   }
-  // Tools allowlist: comma-separated --tools flag (not repeatable).
-  // Critical: Pi's --tools filters ALL tools, including extension-registered
-  // ones. So if we pass --tools write,edit,find we'd strip the postman_* and
-  // consult tools — the chef would receive mail and have no way to read it.
-  // Always include the framework tools when --tools is set.
-  if (chef.tools_allowed.length > 0) {
-    const FRAMEWORK_TOOLS = [
-      // pi-postman registers these.
-      "postman_send",
-      "postman_inbox",
-      "postman_read",
-      "postman_reply",
-      "postman_sessions",
-      "postman_thread",
-      // pi-chefs registers these. consult_list + chef_info appear depending
-      // on session role; harmless to include both for either side.
-      "consult",
-      "consult_list",
-      "chef_info",
-    ];
-    const merged = Array.from(new Set([...chef.tools_allowed, ...FRAMEWORK_TOOLS]));
-    piArgs.push("--tools", merged.join(","));
-  }
+  // No --tools flag. Pi's --tools filters ALL tools including extension-
+  // registered ones, so a chef with tools_allowed=[bash,read,edit] would
+  // lose every domain tool from its allowlisted skills (e.g. data_portal_*
+  // from the data-portal skill). The user can't realistically enumerate
+  // every tool a skill brings.
+  //
+  // Discipline for chefs is in:
+  //   1. --no-skills + explicit --skill <abs-path> per skills_allowed.
+  //      The chef sees only its allowlisted skills, not every skill on disk.
+  //   2. The chef's persona, which scopes what it answers.
+  //
+  // tools_allowed is preserved in the registry as advisory metadata for v0.6
+  // but no longer enforced at spawn time. We may revive it later as a hard
+  // tool-call blocker (similar to PI_CHEFS_DISCIPLINE on the caller side)
+  // if there's a real need to lock down a chef beyond its skill set.
 
   if (dryRun) {
     console.log("pi-chefs spawn --dry-run: resolved config");
