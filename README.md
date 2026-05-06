@@ -97,43 +97,9 @@ pi-chefs install-skill
 
 Reverse with `pi-postman uninstall-skill` / `pi-chefs uninstall-skill` if you ever want to.
 
-### 3. Set up your caller config (the discipline lever)
+### 3. Wire the extensions into Pi
 
-A caller Pi session is the one that *issues* consults. The whole value of pi-chefs comes from the caller having a *narrow* skill set so it has no choice but to route domain questions through chefs.
-
-Generate the caller config interactively:
-
-```bash
-pi-chefs init-caller
-```
-
-The wizard detects your installed skills and recommends keeping only `pi-chefs` + `pi-postman` plus any cross-cutting skills. Domain-specific skills (data tooling, gworkspace, etc.) should be moved into a chef instead.
-
-Writes `~/.pi/chefs/caller.yaml`. You can edit it later if you want to adjust the allowlist.
-
-### 4. Launch a caller session
-
-The canonical way:
-
-```bash
-pi-chefs caller
-```
-
-This launches Pi with:
-- `pi-postman` + `pi-chefs` extensions loaded.
-- Skill auto-discovery disabled (`--no-skills`).
-- Only the skills in `caller.yaml` explicitly loaded.
-- Tool allowlist applied (if set in `caller.yaml`).
-
-Dry-run it to see the resolved command:
-
-```bash
-pi-chefs caller --dry-run
-```
-
-### Or wire the extensions manually (no discipline lever)
-
-If you want a Pi session with full skills + chefs (i.e., not enforcing the lever), load the extensions directly:
+Load both extensions in any Pi session:
 
 ```bash
 pi \
@@ -148,6 +114,43 @@ alias pi='pi --extension "$(pi-postman extension-path)" --extension "$(pi-chefs 
 ```
 
 When the extensions load, the footer shows `chefs: <N> available` and `postman: <handle>`.
+
+## Discipline mode (optional)
+
+The whole value of chefs comes from the caller routing domain questions through them instead of answering directly. By default the `pi-chefs` skill description nudges Pi to call `consult_list` first — but skills are advisory, and Pi will sometimes reach for a domain tool anyway when it's right there.
+
+**Discipline mode** is a hard wall. When enabled, the extension blocks any tool call outside a small allowlist (`postman_*`, `consult*`, `chef_info`, plus read-only inspection: `read, grep, find, ls, bash`) and tells Pi *why* it was blocked, with the right next action.
+
+Enable per-tab:
+
+```bash
+PI_CHEFS_DISCIPLINE=1 pi --extension "$(pi-postman extension-path)" --extension "$(pi-chefs extension-path)"
+```
+
+Or in your shell rc to make it the default everywhere:
+
+```bash
+export PI_CHEFS_DISCIPLINE=1
+```
+
+Then `unset PI_CHEFS_DISCIPLINE` in any tab where you want full-power Pi.
+
+The footer shows `chefs: ... · 🚦 discipline` when the mode is active so you always know which mode you're in.
+
+### Or use `pi-chefs caller` for hard launch-time discipline
+
+The runtime block above is per-call. If you want hard launch-time discipline (Pi *literally never sees* the restricted skills, not even in its tool list), use the dedicated launcher:
+
+```bash
+pi-chefs init-caller   # one-time: generate ~/.pi/chefs/caller.yaml
+pi-chefs caller        # launches Pi with --no-skills + explicit allowlist
+```
+
+This disables Pi's skill auto-discovery and only loads skills your `caller.yaml` allowlists. Use it when you want a guaranteed-clean caller session without trusting the model to respect runtime blocks.
+
+## Or wire the extensions manually (no discipline)
+
+If you want a Pi session with full skills + chefs (i.e., not enforcing the lever), load the extensions directly:
 
 ### Updating
 
@@ -244,6 +247,7 @@ pi-chefs stop <name>         # SIGTERM the chef session
 | `PI_CHEFS_MEMORY_DIR` | `<home>/memory/<name>/` | Per-chef scratch dir, mounted into chef sessions |
 | `PI_POSTMAN_PATH` | auto-resolved | Where `pi-chefs spawn` finds pi-postman |
 | `PI_CHEFS_PI_BIN` | `pi` | Launcher binary for chef *and* caller sessions. Can include args (e.g. `PI_CHEFS_PI_BIN="my-pi-wrapper run"`), or an absolute path to a `pi` binary. |
+| `PI_CHEFS_DISCIPLINE` | unset | When set to `1`/`true`/`yes`/`on`, the caller-side extension blocks tool calls outside the discipline allowlist (`postman_*`, `consult*`, `chef_info`, `read`, `grep`, `find`, `ls`, `bash`). Forces Pi to route domain questions through chefs. Per-tab: set in your shell or rc to enable. |
 
 ### Caller config
 

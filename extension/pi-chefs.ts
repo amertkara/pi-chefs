@@ -57,6 +57,41 @@ function role(): "caller" | "chef" {
   return raw === "chef" ? "chef" : "caller";
 }
 
+/**
+ * Discipline mode: when PI_CHEFS_DISCIPLINE is set to a truthy value, the
+ * extension blocks any tool call NOT in the allowlist below. Default off —
+ * the extension is invisible unless explicitly enabled.
+ *
+ * The allowlist is hardcoded for v1 (read-only inspection + framework tools).
+ * If users need a custom allowlist later, we'll read from caller.yaml.
+ */
+function disciplineEnabled(): boolean {
+  const raw = process.env.PI_CHEFS_DISCIPLINE;
+  if (!raw) return false;
+  return /^(1|true|yes|on)$/i.test(raw.trim());
+}
+
+// Tools allowed even when discipline is on.
+//   - Read-only file inspection (read, grep, find, ls).
+//   - Pi's bash tool (because consult-prep often involves "check what's in
+//     this file" — if you want bash blocked too, add PI_CHEFS_DISCIPLINE_STRICT).
+//   - All postman_* tools (transport for consults).
+//   - All consult_* tools and chef_info (this extension's own surface).
+const DISCIPLINE_ALLOWED_BUILTINS = new Set([
+  "read",
+  "grep",
+  "find",
+  "ls",
+  "bash",
+]);
+function isDisciplineAllowedTool(toolName: string): boolean {
+  if (DISCIPLINE_ALLOWED_BUILTINS.has(toolName)) return true;
+  if (toolName.startsWith("postman_")) return true;
+  if (toolName.startsWith("consult")) return true;
+  if (toolName === "chef_info") return true;
+  return false;
+}
+
 function callerHandle(): string {
   // Reuse pi-postman's handle resolution: PI_POSTMAN_HANDLE > AM_ME > pi-<cwd>.
   const explicit = process.env.PI_POSTMAN_HANDLE ?? process.env.AM_ME;
@@ -107,12 +142,41 @@ export default function (pi: ExtensionAPI) {
       ctx.ui.setStatus("pi-chefs", `chef: ${chefName}`);
     } else {
       const chefs = listChefs();
+      const disciplineSuffix = disciplineEnabled() ? " · 🚦 discipline" : "";
       ctx.ui.setStatus(
         "pi-chefs",
-        `chefs: ${chefs.length} available${chefs.length ? ` (${chefs.map((c) => c.name).join(", ")})` : ""}`,
+        `chefs: ${chefs.length} available${chefs.length ? ` (${chefs.map((c) => c.name).join(", ")})` : ""}${disciplineSuffix}`,
       );
     }
   });
+
+  // ──────────── discipline guard (caller-mode only, opt-in) ────────────
+  //
+  // When PI_CHEFS_DISCIPLINE is set, intercept every outbound tool call. If
+  // the tool isn't in the allowlist, block it and explain why. The agent gets
+  // a tool result like:
+  //   "Discipline mode is on. <tool> is restricted. Use consult_list ..."
+  // ...which it sees as a normal tool failure and re-plans accordingly.
+  //
+  // No skill removal, no relaunch, no special launcher. Set the env var in
+  // any tab where you want chefs to handle the heavy lifting; unset it
+  // (or never set it) for normal full-power Pi.
+  if (sessionRole === "caller" && disciplineEnabled()) {
+    pi.on("tool_call", (event) => {
+      const toolName = event.toolName;
+      if (isDisciplineAllowedTool(toolName)) return;
+      return {
+        block: true,
+        reason:
+          `Discipline mode is on (PI_CHEFS_DISCIPLINE=1). The \`${toolName}\` tool is ` +
+          `restricted in this session because it likely belongs to a domain a chef ` +
+          `should handle. Call \`consult_list\` first to see if a chef covers this ` +
+          `domain; if yes, send the question via \`consult\`. If no chef covers it ` +
+          `and you genuinely need this tool, ask the user to unset PI_CHEFS_DISCIPLINE ` +
+          `or to spawn a chef whose domain includes \`${toolName}\`.`,
+      };
+    });
+  }
 
   pi.on("session_shutdown", async (_event, ctx: ExtensionContext) => {
     if (ctx.hasUI) ctx.ui.setStatus("pi-chefs", undefined);
