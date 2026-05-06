@@ -1,3 +1,8 @@
+---
+name: pi-chefs
+description: "Consult an expert Pi session (a 'chef') for domain-specific questions. Use when the user wants to 'ask the data chef', 'consult chef-X', 'check with the rails chef', etc., or when a question requires deep domain expertise outside your current skill set. The chef does its own investigation in its own context and replies with a distilled answer."
+---
+
 # pi-chefs
 
 You can consult expert Pi sessions ("chefs") that specialize in narrow domains. Each chef runs in its own Pi session with its own context, skills, and tools. Use them when a question is genuinely outside your zone of expertise — or when pulling in a domain skill would poison your context with investigation noise.

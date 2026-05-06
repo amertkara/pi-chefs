@@ -260,6 +260,21 @@ async function cmdStatus(name) {
 }
 
 /**
+ * Resolve a skill name or path to an absolute path on disk.
+ *
+ * - Absolute paths (`/...`) are returned as-is.
+ * - `~/...` paths get the home dir expanded.
+ * - Bare names (`data-portal`) are resolved as `~/.pi/agent/skills/<name>/`,
+ *   which is Pi's standard skill discovery location.
+ */
+function resolveSkillPath(skill) {
+  if (skill.startsWith("/")) return skill;
+  if (skill.startsWith("~/")) return join(homedir(), skill.slice(2));
+  if (skill === "~") return homedir();
+  return join(homedir(), ".pi", "agent", "skills", skill);
+}
+
+/**
  * Resolve the launcher command used to spawn a chef Pi session.
  *
  * Default: bare `pi`. Override via PI_CHEFS_PI_BIN, which can be a single
@@ -318,11 +333,32 @@ async function cmdSpawn(args) {
     "--append-system-prompt",
     persona,
   ];
-  // Skills are loaded with --skill <path> (repeatable). Pi accepts either a
-  // direct file/dir path or a name resolvable from its skill discovery dirs.
-  // We pass each name as-is and let Pi do the resolution.
-  for (const skill of chef.skills_allowed) {
-    piArgs.push("--skill", skill);
+  // Skills: --skill <path> (repeatable). Pi expects an absolute path to a
+  // skill file or directory — bare names like 'data-portal' get resolved
+  // relative to cwd, which is wrong. We translate each name to its absolute
+  // path under ~/.pi/agent/skills/<name>/ (the standard discovery location).
+  // Absolute or ~-prefixed paths in the registry are passed through as-is.
+  //
+  // We also pass --no-skills so Pi's auto-discovery doesn't load skills the
+  // chef wasn't allowlisted for. This is the discipline lever: the chef sees
+  // exactly the skills the registry says it can use, nothing more.
+  if (chef.skills_allowed.length > 0) {
+    piArgs.push("--no-skills");
+    for (const skill of chef.skills_allowed) {
+      const resolved = resolveSkillPath(skill);
+      if (!existsSync(resolved)) {
+        console.error(
+          `pi-chefs: skill "${skill}" not found at ${resolved}. ` +
+            `Install it under ~/.pi/agent/skills/<name>/ or update the registry.`,
+        );
+        process.exit(1);
+      }
+      piArgs.push("--skill", resolved);
+    }
+  } else {
+    // No allowlist: still disable discovery so the chef has zero skills
+    // beyond what its persona declares. This keeps the spawn deterministic.
+    piArgs.push("--no-skills");
   }
   // Tools allowlist is a single comma-separated --tools flag (not repeatable).
   // Built-in tools recognized by Pi: read, bash, edit, write, grep, find, ls.
