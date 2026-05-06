@@ -70,40 +70,66 @@ The chef sees an inbound postman event (auto-react fires), reads the question, d
 ### Prereqs
 
 - Node 22+ (for `--experimental-strip-types`)
-- [pi-postman](https://github.com/amertkara/pi-postman) cloned and working
+- [pi-postman](https://www.npmjs.com/package/pi-postman) installed and skill wired up
 - AMQ installed (`brew install avivsinai/tap/amq`) and `amq coop init` done
 - Pi installed and on `$PATH`
 
-### Clone and link
+### 1. Install both packages
+
+```bash
+npm install -g pi-postman pi-chefs
+```
+
+### 2. Install the skills
+
+Each package ships a skill that teaches Pi *when* and *how* to use its tools. Symlink them into Pi's skill dir:
+
+```bash
+pi-postman install-skill
+pi-chefs install-skill
+```
+
+Reverse with `pi-postman uninstall-skill` / `pi-chefs uninstall-skill` if you ever want to.
+
+### 3. Wire the extensions into Pi
+
+Load both extensions in any Pi session that should be able to consult chefs:
+
+```bash
+pi \
+  --extension "$(pi-postman extension-path)" \
+  --extension "$(pi-chefs extension-path)"
+```
+
+Or alias permanently in `~/.zshrc` / `~/.bashrc`:
+
+```bash
+alias pi='pi --extension "$(pi-postman extension-path)" --extension "$(pi-chefs extension-path)"'
+```
+
+When the extensions load, the footer shows `chefs: <N> available (chef-data, ...)` and `postman: <handle>`.
+
+### `PI_POSTMAN_PATH` (only needed for development)
+
+When you `pi-chefs spawn` a chef, the launcher needs to find pi-postman's extension to wire into the chef session. The npm-installed default works automatically. If you've cloned pi-postman locally for development, override:
+
+```bash
+export PI_POSTMAN_PATH=/absolute/path/to/pi-postman/extension/pi-postman.ts
+```
+
+### Develop locally instead
+
+If you want to hack on pi-chefs:
 
 ```bash
 git clone git@github.com:amertkara/pi-chefs.git ~/src/github.com/amertkara/pi-chefs
 cd ~/src/github.com/amertkara/pi-chefs
 pnpm install
 pnpm typecheck
-
-# Make pi-chefs available globally:
-ln -s "$PWD/bin/pi-chefs.mjs" "$HOME/.local/bin/pi-chefs"   # or wherever your bin lives
+ln -sf "$PWD/bin/pi-chefs.mjs" "$HOME/.local/bin/pi-chefs"
+ln -sf "$PWD/skills/pi-chefs" ~/.pi/agent/skills/pi-chefs
 pi-chefs help
 ```
-
-If `pi-postman` isn't at the default sibling location (`../pi-postman`), set:
-
-```bash
-export PI_POSTMAN_PATH=/absolute/path/to/pi-postman/extension/pi-postman.ts
-```
-
-### Caller-side wiring
-
-In any Pi session that should be able to consult chefs, load both extensions:
-
-```bash
-pi \
-  --extension /path/to/pi-postman/extension/pi-postman.ts \
-  --extension /path/to/pi-chefs/extension/pi-chefs.ts
-```
-
-The footer will show `chefs: <N> available (chef-data, chef-rails, ...)` once registered chefs are detected.
 
 ## Quickstart: spawn `chef-data` and consult it
 
