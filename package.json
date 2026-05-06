@@ -1,0 +1,62 @@
+{
+  "name": "pi-chefs",
+  "version": "0.1.0",
+  "description": "Long-running expert Pi sessions (chefs) that other agents consult via pi-postman. Persona + skill-allowlist layer on top of pi-postman.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Mert Kara <mert.kara@hey.com>",
+  "homepage": "https://github.com/amertkara/pi-chefs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/amertkara/pi-chefs.git"
+  },
+  "bugs": {
+    "url": "https://github.com/amertkara/pi-chefs/issues"
+  },
+  "keywords": [
+    "pi",
+    "pi-extension",
+    "pi-postman",
+    "agent",
+    "multi-agent",
+    "amq",
+    "agent-message-queue"
+  ],
+  "files": [
+    "bin/**",
+    "extension/**",
+    "src/**",
+    "registry/**",
+    "personas/**",
+    "skills/**",
+    "README.md",
+    "LICENSE"
+  ],
+  "bin": {
+    "pi-chefs": "./bin/pi-chefs.mjs"
+  },
+  "pi": {
+    "extensions": [
+      "./extension/pi-chefs.ts"
+    ],
+    "skills": [
+      "./skills/pi-chefs"
+    ]
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.0",
+    "yaml": "^2.5.0"
+  },
+  "devDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  }
+}

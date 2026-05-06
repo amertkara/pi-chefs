@@ -1,0 +1,35 @@
+# Sample chef: chef-data
+#
+# A reference entry showing every field. Copy and edit to register your own.
+
+name: chef-data
+handle: chef-data
+description: Shopify data infrastructure expert. BigQuery, Data Portal, metrics, dashboards.
+domain: |
+  I am the data chef. My domain is Shopify's data infrastructure: BigQuery
+  tables and views, Data Portal metric definitions, Looker/Quick dashboards,
+  and the question of "where does this number come from."
+
+  Ask me things like:
+  - What's the right table for <X>?
+  - Find me a metric that captures <Y>.
+  - Why is dashboard <Z> showing different numbers than I expected?
+  - Write me a SQL query to compute <something>.
+
+  Don't ask me about: Ruby code, Rails patterns, customer-facing UI, or
+  product strategy. I'll tell you to consult a different chef.
+
+persona_file: chef-data.md
+
+skills_allowed:
+  - data-portal
+
+tools_allowed:
+  - bash
+  - read
+
+# Where the chef session lives. ~ is expanded. Defaults to $HOME if omitted.
+# cwd: ~/world/trees/root
+
+# Max time the caller waits for a reply (seconds). Default 300.
+timeout_seconds: 300
