@@ -16,7 +16,13 @@
  */
 
 import { spawn } from "node:child_process";
-import { readFileSync, readdirSync, watch as fsWatch, type FSWatcher } from "node:fs";
+import {
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  watch as fsWatch,
+  type FSWatcher,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -186,6 +192,19 @@ export async function consult(options: ConsultOptions): Promise<ConsultResult> {
   const callerNewDir = inboxNewDir(options.callerHandle);
   const startMs = Date.now();
 
+  // Materialize the caller's inbox dirs up front. AMQ normally creates these
+  // on the caller's first send/receive, but for a brand-new handle that has
+  // never sent anything yet, fs.watch below fails with ENOENT. Creating the
+  // tree (new + cur) is idempotent and safe; AMQ uses the same paths.
+  try {
+    mkdirSync(callerNewDir, { recursive: true });
+    mkdirSync(join(amqRoot(), "agents", options.callerHandle, "inbox", "cur"), {
+      recursive: true,
+    });
+  } catch {
+    // If we can't create them, the send will fail with a clearer error.
+  }
+
   // Snapshot existing files so we don't accidentally match historical mail
   // that happens to share a thread (shouldn't happen since we mint a fresh
   // uuid, but defense in depth).
@@ -195,8 +214,7 @@ export async function consult(options: ConsultOptions): Promise<ConsultResult> {
       if (f.endsWith(".md")) seen.add(f);
     }
   } catch {
-    // Caller's inbox dir may not exist yet — amq creates it on first activity.
-    // The watcher below will be set up after we send (which materializes it).
+    // Shouldn't happen now that we mkdir above, but tolerate.
   }
 
   // Send first; the post-send fs.watch is fine because the chef has to read

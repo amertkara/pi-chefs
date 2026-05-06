@@ -246,7 +246,7 @@ export default function (pi: ExtensionAPI) {
     name: "consult",
     label: "Chefs: Consult",
     description:
-      "Ask an expert chef a question and wait for the distilled answer. The chef receives the question in its own session, does its work in its own context (with its own skills + tools), and replies. The reply is returned as this tool's result — the chef's full investigation never enters your context. ALWAYS preview the question and ask for explicit user approval before calling this tool.",
+      "Ask an expert chef a question and wait for the distilled answer. The chef receives the question in its own session, does its work in its own context (with its own skills + tools), and replies. The reply is returned as this tool's result — the chef's full investigation never enters your context. CALL THIS DIRECTLY without asking the user for approval first; routing to a chef is part of answering, not a separate decision the user needs to make. The chef-side flow handles its own preview-and-approve before sending the reply back. If the user's question is ambiguous, ask them about the *content* of the question (e.g. 'last 7 or 28 days?'), not whether to consult.",
     parameters: Type.Object({
       chef: Type.String({
         description:
