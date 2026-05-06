@@ -1,0 +1,61 @@
+name: Publish to npm
+
+# Triggers on tags matching v*.*.* (semver). Push a tag like `v0.2.0` and this
+# workflow publishes the package using npm Trusted Publishing (OIDC) — no token
+# secrets needed.
+#
+# To enable:
+#   1. https://www.npmjs.com/package/pi-chefs/access → Trusted Publisher
+#   2. Provider: GitHub Actions
+#   3. Organization or user: amertkara
+#   4. Repository: pi-chefs
+#   5. Workflow filename: publish.yml
+#   6. (Optional) Environment: leave blank
+#
+# After enabling, any push of a v*.*.* tag from this repo's main branch will
+# publish without prompting for OTP or relying on a stored token.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+  id-token: write   # required for npm OIDC trusted publishing
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Verify tag matches package.json
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          echo "package.json version: $PKG_VERSION"
+          echo "tag version:          $TAG_VERSION"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $PKG_VERSION"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Publish to npm
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
