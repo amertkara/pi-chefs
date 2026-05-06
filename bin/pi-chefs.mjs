@@ -19,9 +19,10 @@
  *   - Set AM_ME=<handle>, PI_POSTMAN_HANDLE=<handle>, PI_POSTMAN_AUTO_REACT=1
  *   - Set PI_CHEFS_ROLE=chef, PI_CHEFS_NAME=<name>, PI_CHEFS_HANDLE=<handle>
  *   - Wire pi-postman + pi-chefs extensions
- *   - Inject the persona file as system-prompt augmentation (--system-append
- *     or equivalent, depending on Pi version)
- *   - Apply the skill+tool allowlist (Pi --skills, --tools flags)
+ *   - Inject the persona file as system-prompt augmentation
+ *     (--append-system-prompt)
+ *   - Apply the skill+tool allowlist (Pi --skill <name> repeated,
+ *     --tools <comma,separated,list>)
  *   - cd into the chef's resolved cwd
  *   - Spawn `pi` as a foreground process (the user sees the chef tab)
  *   - Write a PID file so `pi-chefs status` and `pi-chefs stop` can find it
@@ -313,18 +314,21 @@ async function cmdSpawn(args) {
     POSTMAN_DEFAULT,
     "--extension",
     PI_CHEFS_EXT,
-    "--system-append",
+    // Inject persona as a system-prompt suffix.
+    "--append-system-prompt",
     persona,
   ];
-  // Skill / tool allowlists. Pi accepts --skills and --tools repeatable flags;
-  // if the running Pi version doesn't recognize them they'll be ignored
-  // gracefully (with a warning, but the session still starts). We include
-  // them to make the discipline lever explicit.
+  // Skills are loaded with --skill <path> (repeatable). Pi accepts either a
+  // direct file/dir path or a name resolvable from its skill discovery dirs.
+  // We pass each name as-is and let Pi do the resolution.
   for (const skill of chef.skills_allowed) {
     piArgs.push("--skill", skill);
   }
-  for (const tool of chef.tools_allowed) {
-    piArgs.push("--tool-allow", tool);
+  // Tools allowlist is a single comma-separated --tools flag (not repeatable).
+  // Built-in tools recognized by Pi: read, bash, edit, write, grep, find, ls.
+  // If the chef has no tools_allowed, fall back to the Pi default (no flag).
+  if (chef.tools_allowed.length > 0) {
+    piArgs.push("--tools", chef.tools_allowed.join(","));
   }
 
   if (dryRun) {

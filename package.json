@@ -1,6 +1,6 @@
 {
   "name": "pi-chefs",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Long-running expert Pi sessions (chefs) that other agents consult via pi-postman. Persona + skill-allowlist layer on top of pi-postman.",
   "type": "module",
   "license": "MIT",

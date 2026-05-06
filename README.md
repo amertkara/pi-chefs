@@ -228,7 +228,7 @@ pi-chefs stop <name>         # SIGTERM the chef session
 
 ## Status
 
-v0.3.0 — works end to end across two Pi tabs (caller + chef), with the caveat that the skill+tool allowlist enforcement depends on Pi's `--system-append`, `--skill`, and `--tool-allow` flags being available. If your Pi version uses different flag names, edit `bin/pi-chefs.mjs` accordingly. If those flags aren't supported at all yet, the chef will spawn with the full skill set; the consult flow still works, but the discipline lever (skill removal) doesn't bite until those flags ship.
+v0.3.4 — works end to end across two Pi tabs (caller + chef). The launcher composes Pi's actual flags: `--append-system-prompt` (persona injection), `--skill <name>` (repeated, per registry `skills_allowed`), `--tools <a,b,c>` (per registry `tools_allowed`), `--extension <path>` (pi-postman + pi-chefs).
 
 ## Develop locally
 
