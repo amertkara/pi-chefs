@@ -63,4 +63,9 @@ jobs:
         # No NODE_AUTH_TOKEN env: npm CLI exchanges the GitHub Actions OIDC
         # token with the npm registry directly once Trusted Publisher is
         # configured for the package on npmjs.org.
-        run: npx -y npm@latest publish --access public --provenance
+        #
+        # No --provenance flag: npm rejects provenance attestation for
+        # private source repos (E422 'Unsupported GitHub Actions source
+        # repository visibility: private'). If the repo is ever flipped to
+        # public, add --provenance back to get Sigstore signing.
+        run: npx -y npm@latest publish --access public
