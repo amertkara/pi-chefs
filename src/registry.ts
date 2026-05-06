@@ -3,18 +3,17 @@
  *
  * A registry entry looks like:
  *
- *   name: chef-data
- *   handle: chef-data
+ *   name: chef-rails
+ *   handle: chef-rails
  *   domain: |
- *     Shopify data infrastructure: BigQuery, Data Portal, metric definitions.
- *     Use me for anything involving SQL, dashboards, or table schemas.
- *   persona_file: chef-data.md
- *   skills_allowed: [data-portal]
+ *     Ruby/Rails/ActiveRecord conventions and idioms. Ask me about
+ *     idiomatic patterns, gotchas, typed associations, etc.
+ *   persona_file: chef-rails.md
+ *   skills_allowed: []
  *   tools_allowed: [bash, read]
- *   cwd: ~/world/trees/root            # optional; defaults to $HOME
+ *   cwd: ~/projects/my-app              # optional; defaults to $HOME
  *   timeout_seconds: 300                # optional; default 300 (consult timeout)
- *   description: |                      # optional; surfaced in `pi-chefs list`
- *     Shopify data expert.
+ *   description: Ruby/Rails patterns expert.   # optional; surfaced in `pi-chefs list`
  */
 
 import { readFileSync, readdirSync } from "node:fs";

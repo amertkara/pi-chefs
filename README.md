@@ -4,7 +4,7 @@
 
 # pi-chefs
 
-A framework for spawning **long-running expert Pi sessions** (chefs) that other Pi sessions can consult. Each chef has a narrow domain — `chef-data` knows Shopify data, `chef-rails` knows Ruby/Rails, etc. — and accumulates context over time within that domain. When a caller agent needs domain expertise, it doesn't run the relevant skill itself; it sends a question to the chef, the chef does the work in its own context, and replies with a distilled answer.
+A framework for spawning **long-running expert Pi sessions** (chefs) that other Pi sessions can consult. Each chef has a narrow domain — `chef-rails` knows Ruby/Rails patterns, `chef-data` knows SQL and analytics, `chef-history` knows your team's recent decisions — and accumulates context over time within that domain. When a caller agent needs domain expertise, it doesn't run the relevant skill itself; it sends a question to the chef, the chef does the work in its own context, and replies with a distilled answer.
 
 Built on [pi-postman](https://github.com/amertkara/pi-postman) for transport.
 
@@ -12,23 +12,23 @@ Built on [pi-postman](https://github.com/amertkara/pi-postman) for transport.
 
 Two pain points motivate this:
 
-1. **Skill bloat.** Pi accumulates dozens of skills and tools per session. The agent picks the wrong one as often as the right one. When `chef-data` exists, you can *remove* the BigQuery / Data Portal skills from the caller's allowlist — the only way the caller can answer a data question is to ask the chef. Forcing function for context discipline.
+1. **Skill bloat.** Pi accumulates dozens of skills and tools per session. The agent picks the wrong one as often as the right one. When `chef-data` exists, you can *remove* the data-related skills from the caller's allowlist — the only way the caller can answer a data question is to ask the chef. Forcing function for context discipline.
 
-2. **Context preservation.** When agent A asks chef-data for "the top 5 shops by GMV last week," chef-data may use 30k tokens producing the answer. Agent A only sees the 200-token reply. Cross-session expertise without cross-session context cost.
+2. **Context preservation.** When agent A asks a chef for "the top 5 customers by spend last week," the chef may use 30k tokens producing the answer. Agent A only sees the 200-token reply. Cross-session expertise without cross-session context cost.
 
 ## Architecture
 
 Two layers, kept separate:
 
-- **[pi-postman](https://github.com/amertkara/pi-postman)** = transport (mailbox primitive, message delivery, live notifications). Already exists.
+- **[pi-postman](https://github.com/amertkara/pi-postman)** = transport (mailbox primitive, message delivery, live notifications).
 - **pi-chefs** = persona + lifecycle layer on top. This repo.
 
 ```
 ┌─────────────────────┐                              ┌─────────────────────┐
-│  Caller Pi tab      │                              │  chef-data Pi tab   │
+│  Caller Pi tab      │                              │  chef-foo Pi tab    │
 │ (your main work)    │                              │ (long-running)      │
-│                     │  consult chef=chef-data      │                     │
-│ skills: minimal     │  ───────────────────────>    │ skills: data-portal │
+│                     │  consult chef=chef-foo       │                     │
+│ skills: minimal     │  ───────────────────────>    │ skills: foo-toolkit │
 │ tools:  bash, read  │                              │ tools:  bash, read  │
 │                     │                              │                     │
 │ + pi-chefs ext      │  <───────────────────────    │ + pi-postman        │
@@ -43,9 +43,9 @@ Two layers, kept separate:
                        └─────────────────────┘
 ```
 
-The caller calls `consult chef="chef-data" subject="..." question="..."`. Internally:
+The caller calls `consult chef="chef-foo" subject="..." question="..."`. Internally:
 
-1. `pi-chefs` mints a thread id like `chefs/chef-data/<uuid>`.
+1. `pi-chefs` mints a thread id like `chefs/chef-foo/<uuid>`.
 2. Sends a postman message to the chef with that thread.
 3. Watches the caller's own inbox for a reply on the same thread.
 4. Returns the reply body as the tool result.
@@ -56,14 +56,15 @@ The chef sees an inbound postman event (auto-react fires), reads the question, d
 
 | Path | Purpose |
 |---|---|
-| `bin/pi-chefs.mjs` | CLI: `list`, `status`, `spawn`, `stop` |
+| `bin/pi-chefs.mjs` | CLI: `init`, `list`, `status`, `spawn`, `stop`, `install-skill` |
 | `extension/pi-chefs.ts` | Pi extension. Caller-mode registers `consult` + `consult_list`. Chef-mode registers `chef_info`. |
+| `src/wizard.ts` | Interactive setup wizard that creates a new chef registry entry + persona stub |
 | `src/registry.ts` | Loads + validates YAML registry entries |
 | `src/consult.ts` | Send-then-watch primitive that powers the `consult` tool |
 | `src/paths.ts` | Standard paths under `~/.pi/chefs/` |
-| `registry/` | Bundled reference chefs (e.g. `chef-data.yaml`) |
-| `personas/` | Bundled reference personas (e.g. `chef-data.md`) |
 | `skills/pi-chefs/` | Caller-side skill teaching Pi when to use `consult` |
+
+This repo intentionally ships *no* pre-defined chefs. The wizard creates them from your machine's actual installed skills.
 
 ## Install
 
@@ -112,7 +113,7 @@ Or alias permanently in `~/.zshrc` / `~/.bashrc`:
 alias pi='pi --extension "$(pi-postman extension-path)" --extension "$(pi-chefs extension-path)"'
 ```
 
-When the extensions load, the footer shows `chefs: <N> available (chef-data, ...)` and `postman: <handle>`.
+When the extensions load, the footer shows `chefs: <N> available` and `postman: <handle>`.
 
 ### Updating
 
@@ -131,52 +132,54 @@ When you `pi-chefs spawn` a chef, the launcher needs to find pi-postman's extens
 export PI_POSTMAN_PATH=/absolute/path/to/pi-postman/extension/pi-postman.ts
 ```
 
-### Develop locally instead
+## Quickstart: create your first chef
 
-If you want to hack on pi-chefs:
+### 1. Run the wizard
 
 ```bash
-git clone git@github.com:amertkara/pi-chefs.git ~/src/github.com/amertkara/pi-chefs
-cd ~/src/github.com/amertkara/pi-chefs
-pnpm install
-pnpm typecheck
-ln -sf "$PWD/bin/pi-chefs.mjs" "$HOME/.local/bin/pi-chefs"
-ln -sf "$PWD/skills/pi-chefs" ~/.pi/agent/skills/pi-chefs
-pi-chefs help
+pi-chefs init
 ```
 
-## Quickstart: spawn `chef-data` and consult it
+The wizard walks you through:
 
-### 1. Spawn the chef in its own terminal
+- **Name + handle** (any `[a-z0-9_-]` string, e.g. `chef-rails`, `chef-frontend`, `chef-history`).
+- **Description + domain** — what's this chef for? what's in scope, what isn't?
+- **Allowed skills** — detected from your `~/.pi/agent/skills/` and offered as a numbered list.
+- **Tool allowlist** — defaults to a minimal `bash, read` so the chef stays read-only.
+- **Working directory + timeout**.
+
+Output: a YAML registry entry at `~/.pi/chefs/registry/<name>.yaml` and a persona stub at `~/.pi/chefs/personas/<name>.md`. **Edit the persona file** to make this chef yours: tighten the domain, add concrete examples, define the personality you want.
+
+### 2. Spawn it
 
 ```bash
-pi-chefs spawn chef-data
+pi-chefs spawn <name>
 ```
 
 This:
-- Loads `registry/chef-data.yaml` and `personas/chef-data.md`.
-- Sets `AM_ME=chef-data`, `PI_POSTMAN_AUTO_REACT=1`, `PI_CHEFS_ROLE=chef`.
-- Restricts skills to `data-portal` and tools to `bash, read`.
+- Loads the registry + persona.
+- Sets `AM_ME=<handle>`, `PI_POSTMAN_AUTO_REACT=1`, `PI_CHEFS_ROLE=chef`.
+- Restricts skills + tools per the registry allowlist.
 - Injects the persona as a system-prompt prefix.
-- Opens a Pi session in the chef's `cwd` (defaults to `$HOME`).
+- Opens a Pi session in the chef's `cwd`.
 
-You're now sitting in the chef's session. Footer: `chef: chef-data`. Postman footer: `postman: chef-data · auto`.
+You're now sitting in the chef's session. Footer: `chef: <name>`. Postman footer: `postman: <handle> · auto`.
 
 To preview without launching:
 
 ```bash
-pi-chefs spawn chef-data --dry-run
+pi-chefs spawn <name> --dry-run
 ```
 
-### 2. From another terminal, run a caller Pi session
+### 3. From another terminal, run a caller Pi session
 
 ```bash
 pi \
-  --extension /path/to/pi-postman/extension/pi-postman.ts \
-  --extension /path/to/pi-chefs/extension/pi-chefs.ts
+  --extension "$(pi-postman extension-path)" \
+  --extension "$(pi-chefs extension-path)"
 ```
 
-### 3. Ask the chef something
+### 4. Ask the chef something
 
 In the caller, ask Pi:
 
@@ -184,41 +187,17 @@ In the caller, ask Pi:
 
 Pi calls `consult_list`. Then:
 
-> Consult chef-data: I need the BigQuery table for checkout abandonment events. Give me a SQL example for last-7-days counts.
+> Consult chef-rails: I'm seeing N+1 query warnings on User#orders. What's the conventional fix?
 
 Pi previews the consult. You approve. The `consult` tool blocks; you see status updates as the chef works (in the chef's tab). When the chef replies, the answer appears as the tool result in the caller. Done.
 
-### 4. Manage chefs
+### 5. Manage chefs
 
 ```bash
 pi-chefs list                # all registered chefs + running status
-pi-chefs status chef-data    # detailed status for one chef
-pi-chefs stop chef-data      # SIGTERM the chef session
+pi-chefs status <name>       # detailed status for one chef
+pi-chefs stop <name>         # SIGTERM the chef session
 ```
-
-## Adding your own chef
-
-1. Write a registry entry at `~/.pi/chefs/registry/<name>.yaml`:
-
-   ```yaml
-   name: chef-rails
-   handle: chef-rails
-   description: Ruby/Rails/Sorbet conventions and patterns.
-   domain: |
-     I am the Rails chef. Ask me about Ruby idioms, Rails patterns,
-     Sorbet typing, ActiveRecord gotchas, and Shopify's component-rails
-     conventions.
-   persona_file: chef-rails.md
-   skills_allowed: []
-   tools_allowed: [bash, read]
-   timeout_seconds: 300
-   ```
-
-2. Write the persona at `~/.pi/chefs/personas/<name>.md`. See `personas/chef-data.md` for the template.
-
-3. `pi-chefs spawn chef-rails`.
-
-User-installed registries take precedence over the bundled ones, so you can override a bundled chef by dropping a same-named YAML in `~/.pi/chefs/registry/`.
 
 ## Configuration
 
@@ -229,7 +208,7 @@ User-installed registries take precedence over the bundled ones, so you can over
 | `PI_CHEFS_NAME` | — | Chef name; set automatically by `spawn`, used by `chef_info` |
 | `PI_CHEFS_HANDLE` | — | Chef handle; set automatically by `spawn` |
 | `PI_CHEFS_MEMORY_DIR` | `<home>/memory/<name>/` | Per-chef scratch dir, mounted into chef sessions |
-| `PI_POSTMAN_PATH` | `../pi-postman/extension/pi-postman.ts` | Where `pi-chefs spawn` finds pi-postman |
+| `PI_POSTMAN_PATH` | auto-resolved | Where `pi-chefs spawn` finds pi-postman |
 
 ## Tools
 
@@ -248,7 +227,19 @@ User-installed registries take precedence over the bundled ones, so you can over
 
 ## Status
 
-v0.1 — works end to end for the bundled `chef-data` example, with the caveat that it depends on Pi's `--system-append`, `--skill`, and `--tool-allow` flags being available. If your Pi version uses different flag names, edit `bin/pi-chefs.mjs` accordingly. If those flags aren't supported at all yet, the chef will spawn with the full skill/tool set; the `consult` flow still works, but the discipline lever (skill removal) doesn't bite until those flags ship.
+v0.3.0 — works end to end across two Pi tabs (caller + chef), with the caveat that the skill+tool allowlist enforcement depends on Pi's `--system-append`, `--skill`, and `--tool-allow` flags being available. If your Pi version uses different flag names, edit `bin/pi-chefs.mjs` accordingly. If those flags aren't supported at all yet, the chef will spawn with the full skill set; the consult flow still works, but the discipline lever (skill removal) doesn't bite until those flags ship.
+
+## Develop locally
+
+```bash
+git clone git@github.com:amertkara/pi-chefs.git ~/src/github.com/amertkara/pi-chefs
+cd ~/src/github.com/amertkara/pi-chefs
+pnpm install
+pnpm typecheck
+ln -sf "$PWD/bin/pi-chefs.mjs" "$HOME/.local/bin/pi-chefs"
+ln -sf "$PWD/skills/pi-chefs" ~/.pi/agent/skills/pi-chefs
+pi-chefs help
+```
 
 ## Related
 

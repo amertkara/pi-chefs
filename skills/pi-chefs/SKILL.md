@@ -5,8 +5,8 @@ You can consult expert Pi sessions ("chefs") that specialize in narrow domains. 
 ## When to use
 
 **Yes:**
-- The user asks a data question (BigQuery, dashboards, metrics) and you don't already have the data tools loaded → consult `chef-data`.
-- You need to know what's in a specific Shopify table without taking on Data Portal as one of your skills.
+- The question requires a skill or toolchain you don't currently have loaded → consult the chef whose domain covers it.
+- You need a domain-specific lookup (a table name, a convention, a precedent) without taking on the full domain skillset.
 - The investigation will involve many tool calls, but the answer fits in a paragraph.
 
 **No:**
@@ -20,8 +20,8 @@ You can consult expert Pi sessions ("chefs") that specialize in narrow domains. 
 2. Pick the right chef based on its `domain` description.
 3. **Compose the question carefully.** The chef has zero context. Include:
    - The specific question, framed for someone who doesn't know your task.
-   - Any error messages, file paths, or table names that are relevant.
-   - The constraint or shape of the answer you need (one paragraph, a SQL query, a yes/no).
+   - Any error messages, file paths, or names that are relevant.
+   - The constraint or shape of the answer you need (one paragraph, a snippet, a yes/no).
 4. **Preview the question to the user before calling `consult`.** This is non-negotiable — same as outbound postman messages. The user is the gate.
 5. Call `consult` with `chef`, `subject`, and `question`. The tool will block until the chef replies (default timeout 300s).
 6. The reply lands in your context as the tool result. Use it. Don't second-guess it unless you have a specific reason to.
@@ -34,14 +34,14 @@ You can consult expert Pi sessions ("chefs") that specialize in narrow domains. 
 
 ## Example
 
-User: "Find the BigQuery table that tracks checkout abandonment events and tell me how to query it for the last 7 days."
+User: "Find the conventional way to express a one-to-many relationship with a custom join condition in this framework."
 
 You: (preview the consult)
 
-> I'm going to consult `chef-data` with this question:
+> I'm going to consult `chef-rails` with this question:
 >
-> **Subject**: checkout abandonment table for last-7-days query
-> **Question**: I need to query checkout abandonment events for the last 7 days. (1) What's the canonical BigQuery table for these events? (2) What's the partition column and time-zone convention? (3) Give me a working SQL example for "count of abandonments per day, last 7 days."
+> **Subject**: one-to-many with custom join condition convention
+> **Question**: I need to express a one-to-many relationship where the join condition isn't just a foreign key (e.g. only matching active records, or matching on a composite key). What's the idiomatic Rails/ActiveRecord pattern? A short example would help.
 >
 > Approve to send?
 
@@ -49,4 +49,4 @@ User: "yes"
 
 You: (call `consult`)
 
-Chef replies with the table name, partition info, and a working query. You return that to the user, possibly with a one-line note on what you did.
+Chef replies with the canonical pattern and a short example. You return that to the user with one line of context for the task.

@@ -1,0 +1,290 @@
+/**
+ * `pi-chefs init` wizard. Walks the user through creating a new chef registry
+ * entry + persona stub interactively, with sensible defaults and live
+ * detection of skills already installed on this machine.
+ *
+ * The wizard never touches the bundled `registry/` or `personas/` dirs; it
+ * always writes to the user's `$PI_CHEFS_HOME` (default `~/.pi/chefs/`).
+ */
+
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { createInterface, type Interface as Readline } from "node:readline/promises";
+import { stdin, stdout } from "node:process";
+import { stringify as yamlStringify } from "yaml";
+import { userPersonasDir, userRegistryDir } from "./paths.ts";
+
+const HANDLE_RE = /^[a-z0-9_-]+$/;
+// Pi's built-in core tools — always available regardless of extension setup.
+const DEFAULT_BUILTIN_TOOLS = ["bash", "read", "write", "edit", "find", "grep", "ls"];
+// Recommended tool allowlist for a freshly-spawned chef.
+const RECOMMENDED_TOOLS = ["bash", "read"];
+
+interface WizardAnswers {
+  name: string;
+  handle: string;
+  description: string;
+  domain: string;
+  skills_allowed: string[];
+  tools_allowed: string[];
+  cwd: string;
+  timeout_seconds: number;
+}
+
+function detectInstalledSkills(): string[] {
+  const skillsDir = join(homedir(), ".pi", "agent", "skills");
+  try {
+    return readdirSync(skillsDir, { withFileTypes: true })
+      .filter((e) => e.isDirectory() || e.isSymbolicLink())
+      .map((e) => e.name)
+      .filter((n) => !n.startsWith("."))
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+async function ask(rl: Readline, prompt: string, fallback?: string): Promise<string> {
+  const suffix = fallback === undefined ? "" : ` [${fallback}]`;
+  const raw = await rl.question(`${prompt}${suffix}: `);
+  const trimmed = raw.trim();
+  if (trimmed) return trimmed;
+  if (fallback !== undefined) return fallback;
+  return "";
+}
+
+async function askMultiline(rl: Readline, prompt: string): Promise<string> {
+  console.log(`${prompt} (multi-line; end with an empty line):`);
+  const lines: string[] = [];
+  for (;;) {
+    const line = await rl.question("  ");
+    if (line.trim() === "") break;
+    lines.push(line);
+  }
+  return lines.join("\n");
+}
+
+async function askYesNo(rl: Readline, prompt: string, defaultYes: boolean): Promise<boolean> {
+  const hint = defaultYes ? "Y/n" : "y/N";
+  const raw = (await rl.question(`${prompt} [${hint}]: `)).trim().toLowerCase();
+  if (!raw) return defaultYes;
+  return raw === "y" || raw === "yes";
+}
+
+function pickByIndex(input: string, options: string[]): string[] {
+  // Accept "1,3,5" style input; map to options. Out-of-range entries are
+  // silently dropped so the user doesn't have to retype.
+  return input
+    .split(/[,\s]+/)
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .map((t) => Number.parseInt(t, 10))
+    .filter((n) => Number.isFinite(n) && n >= 1 && n <= options.length)
+    .map((n) => options[n - 1]!);
+}
+
+function buildPersonaStub(answers: WizardAnswers): string {
+  return `# You are ${answers.name}.
+
+You are a long-running expert Pi session. Other agents consult you when they need expertise in your domain.
+
+## Your domain
+
+${answers.domain.trim()}
+
+## How you receive questions
+
+Other agents send you questions via pi-postman. The pi-postman extension is loaded with \`PI_POSTMAN_AUTO_REACT=1\`, so when a message arrives in your inbox a turn kicks off and you see the arrival prompt. Your default behavior on arrival:
+
+1. Call \`postman_read id="<id>"\` to load the question.
+2. Investigate using your allowed skills and tools.
+3. Distill the answer to **what the asker actually needs to act on**, not the full investigation chain.
+4. Reply with \`postman_reply id="<original-id>" kind="answer" body="..."\` after previewing the body to your operator and getting approval.
+
+## What "distilled" means here
+
+The caller doesn't have your context. They sent a question and are blocked waiting for your reply. They get exactly what you put in the body — no transcript of your investigation, no tool calls, no "I tried X then Y." Your reply should be a self-contained answer that the asker can act on directly.
+
+If the question is ambiguous, ask one focused clarifying question rather than guessing. The asker will reply on the same thread.
+
+## What you don't do
+
+- You don't recursively consult other chefs in v1. If a question is out of scope, reply saying so and suggest the right chef.
+- You don't take destructive actions outside your domain.
+- You don't carry context from one consultation into another in unrelated ways. Each consultation is its own thread.
+
+## Memory
+
+You have a per-chef memory dir at \`$PI_CHEFS_MEMORY_DIR\` (mounted as a regular dir you can \`read\` and \`bash\` against). Use it to persist things you've learned that will help future consultations: gotchas, definitions you've had to clarify before, common follow-ups. Each memory file should have a clear name and a short summary — not transcripts.
+
+## Tone
+
+Direct. Specific. Cite names. Keep replies short unless the question genuinely needs depth.
+
+---
+*This is a generated stub. Edit it to make this chef yours: tighten the domain description, add concrete examples of in-scope vs out-of-scope questions, and define the personality you want.*
+`;
+}
+
+function summarize(answers: WizardAnswers): string {
+  return [
+    "Configuration:",
+    `  name:           ${answers.name}`,
+    `  handle:         ${answers.handle}`,
+    `  description:    ${answers.description}`,
+    `  domain:         ${answers.domain.split("\n")[0]?.slice(0, 60) ?? ""}${answers.domain.split("\n").length > 1 ? " ..." : ""}`,
+    `  skills_allowed: ${answers.skills_allowed.join(", ") || "(none)"}`,
+    `  tools_allowed:  ${answers.tools_allowed.join(", ")}`,
+    `  cwd:            ${answers.cwd}`,
+    `  timeout:        ${answers.timeout_seconds}s`,
+  ].join("\n");
+}
+
+export async function runWizard(): Promise<void> {
+  const rl = createInterface({ input: stdin, output: stdout, terminal: true });
+  try {
+    console.log("👨‍🍳 pi-chefs setup wizard");
+    console.log("");
+    console.log("This will create a new chef registry entry and persona stub.");
+    console.log("Files are written to your user dir, not the bundled package.");
+    console.log("Press Ctrl-C at any time to cancel.");
+    console.log("");
+
+    // ── name + handle ────────────────────────────────────────────────
+    let name = "";
+    while (!name) {
+      const raw = await ask(rl, "Chef name (lowercase, [a-z0-9_-], e.g. chef-rails)");
+      if (!HANDLE_RE.test(raw)) {
+        console.log(`  ✗ "${raw}" must match ${HANDLE_RE}`);
+        continue;
+      }
+      name = raw;
+    }
+
+    let handle = "";
+    while (!handle) {
+      const raw = await ask(rl, "AMQ handle (must match [a-z0-9_-])", name);
+      if (!HANDLE_RE.test(raw)) {
+        console.log(`  ✗ "${raw}" must match ${HANDLE_RE}`);
+        continue;
+      }
+      handle = raw;
+    }
+
+    // ── description + domain ─────────────────────────────────────────
+    const description = await ask(rl, "One-line description (shown in `pi-chefs list`)");
+    const domain = await askMultiline(
+      rl,
+      "Domain — what's this chef for? what's in scope, what isn't?",
+    );
+
+    // ── skills ───────────────────────────────────────────────────────
+    const installedSkills = detectInstalledSkills();
+    let skills_allowed: string[];
+    if (installedSkills.length === 0) {
+      console.log("");
+      console.log("No skills detected in ~/.pi/agent/skills/.");
+      const raw = await ask(rl, "Allowed skills (comma-separated, blank for none)", "");
+      skills_allowed = raw ? raw.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean) : [];
+    } else {
+      console.log("");
+      console.log("Detected skills in ~/.pi/agent/skills/:");
+      installedSkills.forEach((s, i) => console.log(`  [${i + 1}] ${s}`));
+      const raw = await ask(
+        rl,
+        "Pick allowed skills (comma-separated numbers; blank for none)",
+        "",
+      );
+      skills_allowed = pickByIndex(raw, installedSkills);
+    }
+
+    // ── tools ────────────────────────────────────────────────────────
+    console.log("");
+    console.log(`Built-in tools available: ${DEFAULT_BUILTIN_TOOLS.join(", ")}`);
+    console.log(`Recommended for chefs:    ${RECOMMENDED_TOOLS.join(", ")}`);
+    const toolsRaw = await ask(
+      rl,
+      "Tool allowlist (comma-separated)",
+      RECOMMENDED_TOOLS.join(","),
+    );
+    const tools_allowed = toolsRaw.split(/[,\s]+/).map((t) => t.trim()).filter(Boolean);
+
+    // ── cwd + timeout ────────────────────────────────────────────────
+    const cwdRaw = await ask(rl, "Working directory for the chef session", "~");
+    const cwd = cwdRaw;
+
+    let timeout_seconds = 300;
+    const timeoutRaw = await ask(rl, "Consult timeout in seconds", "300");
+    const parsed = Number.parseInt(timeoutRaw, 10);
+    if (Number.isFinite(parsed) && parsed > 0) timeout_seconds = parsed;
+
+    const answers: WizardAnswers = {
+      name,
+      handle,
+      description,
+      domain,
+      skills_allowed,
+      tools_allowed,
+      cwd,
+      timeout_seconds,
+    };
+
+    console.log("");
+    console.log(summarize(answers));
+    console.log("");
+
+    const registryPath = join(userRegistryDir(), `${name}.yaml`);
+    const personaPath = join(userPersonasDir(), `${name}.md`);
+
+    if (existsSync(registryPath)) {
+      const overwrite = await askYesNo(
+        rl,
+        `Registry entry already exists at ${registryPath}. Overwrite?`,
+        false,
+      );
+      if (!overwrite) {
+        console.log("Aborted.");
+        return;
+      }
+    }
+
+    const confirm = await askYesNo(
+      rl,
+      `Write registry to ${registryPath} and persona stub to ${personaPath}?`,
+      true,
+    );
+    if (!confirm) {
+      console.log("Aborted.");
+      return;
+    }
+
+    mkdirSync(userRegistryDir(), { recursive: true });
+    mkdirSync(userPersonasDir(), { recursive: true });
+
+    const yaml = yamlStringify({
+      name: answers.name,
+      handle: answers.handle,
+      description: answers.description,
+      domain: answers.domain || `(no domain specified yet — edit ${registryPath})`,
+      persona_file: `${name}.md`,
+      skills_allowed: answers.skills_allowed,
+      tools_allowed: answers.tools_allowed,
+      cwd: answers.cwd,
+      timeout_seconds: answers.timeout_seconds,
+    });
+    writeFileSync(registryPath, yaml);
+    writeFileSync(personaPath, buildPersonaStub(answers));
+
+    console.log("");
+    console.log(`✓ Wrote ${registryPath}`);
+    console.log(`✓ Wrote ${personaPath}`);
+    console.log("");
+    console.log("Edit the persona file to define how this chef behaves.");
+    console.log("");
+    console.log("Next:");
+    console.log(`  pi-chefs spawn ${name}`);
+  } finally {
+    rl.close();
+  }
+}

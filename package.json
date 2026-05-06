@@ -1,10 +1,10 @@
 {
   "name": "pi-chefs",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Long-running expert Pi sessions (chefs) that other agents consult via pi-postman. Persona + skill-allowlist layer on top of pi-postman.",
   "type": "module",
   "license": "MIT",
-  "author": "Mert Kara <mert.kara@hey.com>",
+  "author": "Mert Kara <amertkara@gmail.com>",
   "homepage": "https://github.com/amertkara/pi-chefs",
   "repository": {
     "type": "git",
@@ -26,8 +26,6 @@
     "bin/**",
     "extension/**",
     "src/**",
-    "registry/**",
-    "personas/**",
     "skills/**",
     "assets/**",
     "README.md",

@@ -3,6 +3,7 @@
  * pi-chefs CLI.
  *
  * Subcommands:
+ *   pi-chefs init                  Interactive wizard: create a new chef
  *   pi-chefs list                  List registered chefs
  *   pi-chefs status [<name>]       Show running status (all chefs, or one)
  *   pi-chefs spawn <name>          Launch the chef as a long-running Pi session
@@ -85,6 +86,9 @@ if (!process.execArgv.some((a) => a.includes("strip-types"))) {
 async function main() {
   const [, , subcommand, ...rest] = process.argv;
   switch (subcommand) {
+    case "init":
+      await cmdInit();
+      break;
     case "list":
       await cmdList();
       break;
@@ -123,6 +127,7 @@ function printHelp() {
   console.log(`pi-chefs — long-running expert Pi sessions
 
 Usage:
+  pi-chefs init                       Interactive wizard: create a new chef
   pi-chefs list                       List registered chefs
   pi-chefs status [<name>]            Show running status
   pi-chefs spawn <name> [--dry-run]   Launch a chef
@@ -136,6 +141,11 @@ Env:
   PI_CHEFS_HOME      Override default ~/.pi/chefs/ root
   PI_POSTMAN_PATH    Path to pi-postman extension (default: ../pi-postman)
 `);
+}
+
+async function cmdInit() {
+  const { runWizard } = await import(join(REPO_ROOT, "src", "wizard.ts"));
+  await runWizard();
 }
 
 async function cmdList() {
