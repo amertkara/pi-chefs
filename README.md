@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.svg" alt="pi-chefs logo" width="160" height="160" />
+</p>
+
 # pi-chefs
 
 A framework for spawning **long-running expert Pi sessions** (chefs) that other Pi sessions can consult. Each chef has a narrow domain — `chef-data` knows Shopify data, `chef-rails` knows Ruby/Rails, etc. — and accumulates context over time within that domain. When a caller agent needs domain expertise, it doesn't run the relevant skill itself; it sends a question to the chef, the chef does the work in its own context, and replies with a distilled answer.

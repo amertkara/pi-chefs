@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="pi-chefs logo">
+  <title>pi-chefs</title>
+  <desc>A tall pleated chef's toque hat with the Greek letter pi as the emblem on the band.</desc>
+
+  <!-- soft cream background to match pi-postman -->
+  <rect width="256" height="256" rx="28" fill="#FAF7F0"/>
+
+  <!-- toque puff: a tall billowy shape made of overlapping pleated lobes
+       arranged in an arc. Outline is one continuous silhouette. -->
+  <path d="M 64 130
+           C 52 130, 48 110, 56 96
+           C 44 86, 50 64, 70 60
+           C 70 42, 92 32, 110 44
+           C 116 28, 144 28, 152 46
+           C 170 36, 196 50, 192 70
+           C 210 78, 210 102, 196 110
+           C 208 122, 200 138, 188 134
+           Z"
+        fill="#FFFDF6" stroke="#1F1A14" stroke-width="6" stroke-linejoin="round"/>
+
+  <!-- subtle pleat lines on the puff to make it read as fabric, not balls -->
+  <path d="M 88 70 C 88 88, 92 110, 92 130" fill="none" stroke="#1F1A14" stroke-width="2.5" stroke-linecap="round" opacity="0.35"/>
+  <path d="M 128 50 C 128 80, 128 108, 128 130" fill="none" stroke="#1F1A14" stroke-width="2.5" stroke-linecap="round" opacity="0.35"/>
+  <path d="M 168 60 C 168 88, 164 110, 164 130" fill="none" stroke="#1F1A14" stroke-width="2.5" stroke-linecap="round" opacity="0.35"/>
+
+  <!-- toque skirt / band: cylindrical base the puff sits on -->
+  <path d="M 60 130
+           Q 60 124 66 124
+           L 190 124
+           Q 196 124 196 130
+           L 196 188
+           Q 196 198 186 198
+           L 70 198
+           Q 60 198 60 188 Z"
+        fill="#FFFDF6" stroke="#1F1A14" stroke-width="6" stroke-linejoin="round"/>
+
+  <!-- thin seam where the puff meets the band -->
+  <line x1="60" y1="134" x2="196" y2="134" stroke="#1F1A14" stroke-width="2.5" stroke-linecap="round" opacity="0.35"/>
+
+  <!-- red ribbon band hugging the bottom of the skirt -->
+  <path d="M 60 174
+           L 196 174
+           L 196 188
+           Q 196 198 186 198
+           L 70 198
+           Q 60 198 60 188 Z"
+        fill="#C2410C" stroke="#1F1A14" stroke-width="6" stroke-linejoin="round"/>
+
+  <!-- π emblem on the band, sitting above the red ribbon -->
+  <text x="128" y="166" text-anchor="middle"
+        font-family="'Iowan Old Style','Georgia',serif"
+        font-size="40" font-weight="700"
+        fill="#1F1A14">π</text>
+</svg>
