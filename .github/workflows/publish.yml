@@ -47,6 +47,10 @@ jobs:
             exit 1
           fi
 
+      - name: Upgrade npm to a version that supports Trusted Publishing
+        # OIDC trusted publishing requires npm >=11.5.1; the runner ships ~10.x.
+        run: npm install -g npm@latest
+
       - name: Install dependencies
         run: |
           corepack enable
@@ -56,6 +60,6 @@ jobs:
         run: pnpm typecheck
 
       - name: Publish to npm
+        # No NODE_AUTH_TOKEN — npm CLI exchanges the GitHub Actions OIDC token
+        # with the npm registry directly when Trusted Publisher is configured.
         run: npm publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
