@@ -77,8 +77,13 @@ The chef sees an inbound postman event (auto-react fires), reads the question, d
 ### 1. Install both packages
 
 ```bash
-npm install -g pi-postman pi-chefs
+# Pick the package manager you have on $PATH:
+npm  install -g pi-postman pi-chefs           # npm 11+
+pnpm add     -g pi-postman pi-chefs           # pnpm
+yarn global add pi-postman pi-chefs           # yarn
 ```
+
+> If pnpm refuses with `ERR_PNPM_NO_MATURE_MATCHING_VERSION` (its default release-age cooldown), pass `--config.minimumReleaseAge=0`.
 
 ### 2. Install the skills
 
@@ -108,6 +113,15 @@ alias pi='pi --extension "$(pi-postman extension-path)" --extension "$(pi-chefs 
 ```
 
 When the extensions load, the footer shows `chefs: <N> available (chef-data, ...)` and `postman: <handle>`.
+
+### Updating
+
+```bash
+npm  install -g pi-postman@latest pi-chefs@latest
+pnpm add     -g pi-postman@latest pi-chefs@latest --config.minimumReleaseAge=0
+```
+
+Skill symlinks resolve through the package manager's store path, so they auto-pick up the new version. No need to re-run `install-skill`.
 
 ### `PI_POSTMAN_PATH` (only needed for development)
 
