@@ -36,7 +36,8 @@ export interface ConsultOptions {
   subject: string;
   /** The question itself, full markdown. */
   body: string;
-  /** Max time to wait for a reply, in milliseconds. */
+  /** Max time to wait for a reply, in milliseconds. (Used by the blocking
+   *  consult() helper; ignored by consultSend(). */
   timeoutMs: number;
 }
 
@@ -49,6 +50,30 @@ export interface ConsultResult {
   thread_id: string;
   /** Wall-clock time the consult took, in milliseconds. */
   elapsed_ms: number;
+}
+
+export interface ConsultSendResult {
+  /** Thread id minted for this consultation. */
+  thread_id: string;
+  /** Outbound message id assigned by AMQ. */
+  message_id: string;
+  /** When the message was sent. */
+  sent_at: Date;
+}
+
+export interface ConsultReplyEvent {
+  /** The thread id (chefs/<chef>/<uuid>) the reply belongs to. */
+  thread_id: string;
+  /** Chef's AMQ handle (the from field). */
+  chef_handle: string;
+  /** Reply message id. */
+  reply_id: string;
+  /** Reply subject ("re: ..." usually). */
+  subject: string;
+  /** Reply body. */
+  body: string;
+  /** When the reply arrived. */
+  arrived_at: Date;
 }
 
 export class ConsultTimeoutError extends Error {
@@ -183,9 +208,161 @@ function amqRead(me: string, id: string): Promise<void> {
 }
 
 /**
+ * Fire-and-forget version of consult: mints a thread, sends the question,
+ * pre-creates the caller's inbox dirs (so subsequent fs.watch can attach),
+ * returns immediately. The caller is expected to use watchConsultReplies()
+ * to receive the reply asynchronously.
+ */
+export async function consultSend(
+  options: Omit<ConsultOptions, "timeoutMs">,
+): Promise<ConsultSendResult> {
+  const threadId = `chefs/${options.chefHandle}/${randomUUID()}`;
+  const callerNewDir = inboxNewDir(options.callerHandle);
+
+  // Materialize inbox dirs up front so the watcher can attach later without
+  // ENOENT for first-ever sends from this handle.
+  try {
+    mkdirSync(callerNewDir, { recursive: true });
+    mkdirSync(join(amqRoot(), "agents", options.callerHandle, "inbox", "cur"), {
+      recursive: true,
+    });
+  } catch {
+    // best-effort
+  }
+
+  const sent = await amqSend({
+    me: options.callerHandle,
+    to: options.chefHandle,
+    subject: options.subject,
+    body: options.body,
+    thread: threadId,
+    kind: "question",
+  });
+
+  return {
+    thread_id: threadId,
+    message_id: sent.id,
+    sent_at: new Date(),
+  };
+}
+
+/**
+ * Long-running watcher on the caller's inbox/new dir. Calls onReply for
+ * every message whose thread starts with `chefs/` (i.e. could be a reply
+ * to a previously-sent consult). Returns a Closer the caller can call to
+ * stop watching.
+ *
+ * Unlike the blocking consult() helper, this doesn't track which threads
+ * are pending — the caller decides what to do with each reply (e.g. inject
+ * it into the agent's session and let the agent correlate by thread id).
+ *
+ * Pre-existing files in new/ at start time are NOT replayed (we seed the
+ * `seen` set). Only files that appear after the watcher attaches fire
+ * onReply.
+ */
+export interface ConsultReplyWatcherOptions {
+  callerHandle: string;
+  onReply: (event: ConsultReplyEvent) => void;
+  onError?: (err: Error) => void;
+}
+export interface ConsultReplyWatcherCloser {
+  close(): void;
+}
+export function watchConsultReplies(
+  options: ConsultReplyWatcherOptions,
+): ConsultReplyWatcherCloser {
+  const callerNewDir = inboxNewDir(options.callerHandle);
+  try {
+    mkdirSync(callerNewDir, { recursive: true });
+  } catch {
+    // best-effort; fs.watch will error below if the dir really can't exist
+  }
+
+  // Seed seen so we don't replay history. Future arrivals are everything
+  // not in `seen`.
+  const seen = new Set<string>();
+  try {
+    for (const f of readdirSync(callerNewDir)) {
+      if (f.endsWith(".md")) seen.add(f);
+    }
+  } catch {
+    // dir may not exist yet — we'll learn from fs.watch errors
+  }
+
+  let closed = false;
+  let watcher: FSWatcher;
+
+  const handleFile = async (filename: string): Promise<void> => {
+    if (closed) return;
+    if (!filename.endsWith(".md")) return;
+    if (seen.has(filename)) return;
+    seen.add(filename);
+
+    const fullPath = join(callerNewDir, filename);
+    let header = parseMaildirFile(fullPath);
+    if (!header) {
+      // Probably a partial write — retry once.
+      await new Promise((r) => setTimeout(r, 50));
+      header = parseMaildirFile(fullPath);
+      if (!header) return;
+    }
+    if (!header.thread || !header.thread.startsWith("chefs/")) return;
+    if (!header.from) return;
+
+    const body = readMaildirBody(fullPath);
+    const replyId = header.id ?? filename.replace(/\.md$/, "");
+
+    // Drain to cur so the user's manual postman_inbox doesn't surface chef
+    // plumbing they didn't ask about.
+    try {
+      await amqRead(options.callerHandle, replyId);
+    } catch {
+      // best-effort
+    }
+
+    options.onReply({
+      thread_id: header.thread,
+      chef_handle: header.from,
+      reply_id: replyId,
+      subject: header.subject ?? "(no subject)",
+      body: body.trimEnd(),
+      arrived_at: new Date(),
+    });
+  };
+
+  try {
+    watcher = fsWatch(callerNewDir, { persistent: false }, (_eventType, filename) => {
+      if (!filename) return;
+      handleFile(filename).catch(() => {});
+    });
+    watcher.on("error", (err: Error) => {
+      if (options.onError) options.onError(err);
+    });
+  } catch (err) {
+    if (options.onError) options.onError(err as Error);
+    return { close: () => {} };
+  }
+
+  return {
+    close() {
+      closed = true;
+      try {
+        watcher.close();
+      } catch {
+        // already closed
+      }
+    },
+  };
+}
+
+/**
  * Send a question to a chef and wait for the reply. The chef is expected to
  * reply via postman_reply (or postman_send with the same thread). We watch
  * the caller's inbox/new dir for any message on this thread from the chef.
+ *
+ * @deprecated Prefer consultSend() + watchConsultReplies() for non-blocking
+ * UX. This blocking variant is retained for one-shot CLI use cases where
+ * the caller genuinely wants to wait.
  */
 export async function consult(options: ConsultOptions): Promise<ConsultResult> {
   const threadId = `chefs/${options.chefHandle}/${randomUUID()}`;

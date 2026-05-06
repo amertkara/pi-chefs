@@ -38,9 +38,10 @@ Do not reach for `data_portal_*`, `bigquery_*`, or any other domain tool *before
    - The specific question, framed for someone who doesn't know your task.
    - Any error messages, file paths, or names that are relevant.
    - The constraint or shape of the answer you need (one paragraph, a snippet, a yes/no).
-4. **Just call `consult`.** Don't ask the user "OK to send?" — the user already asked you the question; routing it to the right chef is part of the job, not a separate decision. If the question is ambiguous and you genuinely need clarification, ask the user about the *content* of the question ("do you want last 7 days or last 28 days?"), not about whether to consult. The chef-side preview-and-approve flow handles outbound message review on the chef tab.
-5. Call `consult` with `chef`, `subject`, and `question`. The tool will block until the chef replies (default timeout 300s).
-6. The reply lands in your context as the tool result. Use it. Don't second-guess it unless you have a specific reason to.
+4. **Just call `consult`.** Don't ask the user "OK to send?" — the user already asked you the question; routing it to the right chef is part of the job, not a separate decision. If the question is ambiguous and you genuinely need clarification, ask the user about the *content* of the question ("do you want last 7 days or last 28 days?"), not about whether to consult.
+5. Call `consult` with `chef`, `subject`, and `question`. **The tool returns immediately** with a thread id and confirmation that the question was sent. **You don't wait** for the reply.
+6. **The reply arrives asynchronously.** When the chef sends its answer, it's automatically injected into your session as a user message (you'll see a '📬 Reply from <chef>...' prompt and a new turn will kick off). At that point you can correlate by thread id, return the answer to the user, and continue.
+7. **In the meantime**, you can do other work — finish whatever else the user asked, look at unrelated files, etc. If you genuinely have nothing else to do, just tell the user the consult is in flight and you'll surface the answer when it arrives.
 
 ## Anti-patterns
 
@@ -52,10 +53,10 @@ Do not reach for `data_portal_*`, `bigquery_*`, or any other domain tool *before
 
 User: "Find the conventional way to express a one-to-many relationship with a custom join condition in this framework."
 
-You: (call `consult_list`, see chef-rails covers Rails patterns, then call `consult`)
+Turn 1 — you call `consult_list`, see chef-rails covers Rails patterns, then call `consult`. The tool returns: "✉️  Sent to chef-rails. Thread: chefs/chef-rails/<uuid>. Reply will arrive asynchronously."
 
-> *consulting chef-rails: "one-to-many with custom join condition convention" — I need to express a one-to-many relationship where the join condition isn't just a foreign key (e.g. only matching active records, or matching on a composite key). What's the idiomatic Rails/ActiveRecord pattern? A short example would help.*
+You tell the user: *"I've asked chef-rails for the canonical pattern. Reply incoming."*
 
-Chef replies with the canonical pattern and a short example. You return that to the user with one line of context for the task.
+Turn 2 — the chef's reply lands. You see an injected user message: "📬 Reply from chef-rails..." with the canonical pattern + example. You correlate by thread id, summarize for the user, and continue.
 
-(Notice: no "approve to send?" prompt. The user asked the question; routing it to the right chef is part of answering, not a new decision the user needs to make.)
+(Notice: no "approve to send?" prompt, no blocking wait. The consult tool fires, returns, and the reply arrives later as a fresh turn.)

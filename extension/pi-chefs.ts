@@ -43,10 +43,15 @@ import { Type } from "@sinclair/typebox";
 // truth and don't have to rely on jiti to walk into our own src/.
 import {
   AmqMissingError,
-  ConsultTimeoutError,
-  consult as consultPrimitive,
+  consultSend,
+  watchConsultReplies,
+  type ConsultReplyEvent,
+  type ConsultReplyWatcherCloser,
 } from "../dist/consult.js";
 import { listChefs, loadChef, type ResolvedChef } from "../dist/registry.js";
+import { existsSync, readdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -131,23 +136,114 @@ function describeChef(chef: ResolvedChef): string {
 // Extension
 // ──────────────────────────────────────────────────────────────────────────────
 
+// Resolve AMQ root the same way the consult primitive does. Used to scan
+// chef inboxes at session_start for unread mail.
+function amqRoot(): string {
+  return process.env.AM_ROOT ?? process.env.AMQ_GLOBAL_ROOT ?? join(homedir(), ".agent-mail");
+}
+function inboxNewDir(h: string): string {
+  return join(amqRoot(), "agents", h, "inbox", "new");
+}
+
 export default function (pi: ExtensionAPI) {
   const sessionRole = role();
   const handle = callerHandle();
+
+  // Caller-mode: long-running fs.watch that injects each consult reply into
+  // the agent's session as a user message. The agent reacts to the injection
+  // (sees subject + body), correlates by thread id, and responds to the user.
+  // Cleaned up at session_shutdown.
+  let replyWatcher: ConsultReplyWatcherCloser | undefined;
 
   pi.on("session_start", async (_event, ctx: ExtensionContext) => {
     if (!ctx.hasUI) return;
     if (sessionRole === "chef") {
       const chefName = process.env.PI_CHEFS_NAME ?? "(unnamed-chef)";
       ctx.ui.setStatus("pi-chefs", `chef: ${chefName}`);
-    } else {
-      const chefs = listChefs();
-      const disciplineSuffix = disciplineEnabled() ? " · 🚦 discipline" : "";
-      ctx.ui.setStatus(
-        "pi-chefs",
-        `chefs: ${chefs.length} available${chefs.length ? ` (${chefs.map((c) => c.name).join(", ")})` : ""}${disciplineSuffix}`,
-      );
+
+      // On chef startup: drain any unread mail. pi-postman's watcher seeds
+      // its `seen` set at session_start to avoid notifying on historical
+      // mail — correct for callers, wrong for chefs (unread mail IS work).
+      // Inject a user message listing what's pending so the agent calls
+      // postman_inbox and addresses each one.
+      try {
+        const unread = readdirSync(inboxNewDir(handle))
+          .filter((f) => f.endsWith(".md"))
+          .sort();
+        if (unread.length > 0) {
+          const promptLines = [
+            `📬 You have ${unread.length} unread message${unread.length === 1 ? "" : "s"} in your inbox from before this session started.`,
+            "",
+            "Call `postman_inbox` to list them, then `postman_read id=\"<id>\"` for each. After you've understood the question, do whatever investigation it needs and reply via `postman_reply`.",
+          ];
+          try {
+            const result = pi.sendUserMessage(promptLines.join("\n"), {
+              deliverAs: "followUp",
+            }) as unknown as Promise<void> | void;
+            if (result && typeof (result as Promise<void>).then === "function") {
+              (result as Promise<void>).catch(() => {});
+            }
+          } catch {
+            // sendUserMessage not available in this Pi build — fall back to a toast.
+            ctx.ui.notify(
+              `pi-chefs: ${unread.length} unread message(s) in inbox. Run \`postman_inbox\` to drain.`,
+              "info",
+            );
+          }
+        }
+      } catch {
+        // No inbox dir yet — fine, nothing to drain.
+      }
+      return;
     }
+
+    // Caller-mode footer + reply watcher.
+    const chefs = listChefs();
+    const disciplineSuffix = disciplineEnabled() ? " · 🚦 discipline" : "";
+    ctx.ui.setStatus(
+      "pi-chefs",
+      `chefs: ${chefs.length} available${chefs.length ? ` (${chefs.map((c) => c.name).join(", ")})` : ""}${disciplineSuffix}`,
+    );
+
+    // Start the consult-reply watcher. Each reply that lands on a thread
+    // starting with `chefs/` gets injected into the session as a user message.
+    replyWatcher = watchConsultReplies({
+      callerHandle: handle,
+      onReply: (event: ConsultReplyEvent) => {
+        const lines = [
+          `📬 Reply from ${event.chef_handle} to your consult:`,
+          `  thread:  ${event.thread_id}`,
+          `  subject: ${event.subject}`,
+          "",
+          event.body,
+        ];
+        try {
+          const result = pi.sendUserMessage(lines.join("\n"), {
+            deliverAs: "followUp",
+          }) as unknown as Promise<void> | void;
+          if (result && typeof (result as Promise<void>).then === "function") {
+            (result as Promise<void>).catch((err: Error) => {
+              ctx.ui.notify(
+                `pi-chefs: failed to inject consult reply: ${err.message}`,
+                "warning",
+              );
+            });
+          }
+          ctx.ui.notify(
+            `✅ Reply from ${event.chef_handle}: ${event.subject}`,
+            "info",
+          );
+        } catch (err) {
+          ctx.ui.notify(
+            `pi-chefs: failed to inject consult reply: ${(err as Error).message}`,
+            "warning",
+          );
+        }
+      },
+      onError: (err: Error) => {
+        ctx.ui.notify(`pi-chefs reply watcher error: ${err.message}`, "warning");
+      },
+    });
   });
 
   // ──────────── discipline guard (caller-mode only, opt-in) ────────────
@@ -179,6 +275,7 @@ export default function (pi: ExtensionAPI) {
   }
 
   pi.on("session_shutdown", async (_event, ctx: ExtensionContext) => {
+    if (replyWatcher) replyWatcher.close();
     if (ctx.hasUI) ctx.ui.setStatus("pi-chefs", undefined);
   });
 
@@ -246,11 +343,11 @@ export default function (pi: ExtensionAPI) {
     name: "consult",
     label: "Chefs: Consult",
     description:
-      "Ask an expert chef a question and wait for the distilled answer. The chef receives the question in its own session, does its work in its own context (with its own skills + tools), and replies. The reply is returned as this tool's result — the chef's full investigation never enters your context. CALL THIS DIRECTLY without asking the user for approval first; routing to a chef is part of answering, not a separate decision the user needs to make. The chef-side flow handles its own preview-and-approve before sending the reply back. If the user's question is ambiguous, ask them about the *content* of the question (e.g. 'last 7 or 28 days?'), not whether to consult.",
+      "Send a question to an expert chef. **Returns immediately** with a thread id; the chef's reply arrives asynchronously as a user message injected into your session (you'll see '📬 Reply from <chef>...' in the next turn). CALL THIS DIRECTLY without asking the user for approval first; routing to a chef is part of answering, not a separate decision. After calling consult, you can either wait for the reply (the user can ask 'any reply yet?') or proceed with other work — when the reply lands, a new turn is automatically triggered with the chef's answer. The chef does its work in its own context with its own skills + tools, and never sends its full investigation back — only the distilled answer.",
     parameters: Type.Object({
       chef: Type.String({
         description:
-          "Chef name (from `consult_list`), e.g. `chef-data`. Not the handle — the name.",
+          "Chef name (from `consult_list`), e.g. `data-chef`. Not the handle — the name.",
       }),
       subject: Type.String({
         description: "One-line summary of the question. Surfaced in the chef's inbox toast.",
@@ -259,12 +356,6 @@ export default function (pi: ExtensionAPI) {
         description:
           "The full question, in Markdown. Be specific. Include filenames, error messages, and any constraints the chef needs to know. The chef can't see your context — give it everything relevant.",
       }),
-      timeout_seconds: Type.Optional(
-        Type.Number({
-          description:
-            "Max time to wait for the chef's reply, in seconds. Defaults to the chef's registry-configured timeout (typically 300s).",
-        }),
-      ),
     }),
     async execute(_id, params) {
       let chef: ResolvedChef;
@@ -273,29 +364,25 @@ export default function (pi: ExtensionAPI) {
       } catch (err) {
         return toolError(`consult: ${(err as Error).message}`);
       }
-      const timeoutMs =
-        (params.timeout_seconds ?? chef.resolved_timeout_seconds) * 1000;
 
       try {
-        const result = await consultPrimitive({
+        const sent = await consultSend({
           callerHandle: handle,
           chefHandle: chef.handle,
           subject: params.subject,
           body: params.question,
-          timeoutMs,
         });
-        const header = [
-          `Reply from ${chef.name} (${result.elapsed_ms}ms, thread=${result.thread_id})`,
-          "─".repeat(60),
-        ].join("\n");
-        return toolOk(`${header}\n${result.body}`);
+        const lines = [
+          `✉️  Sent to ${chef.name} (handle: ${chef.handle}).`,
+          `   thread:     ${sent.thread_id}`,
+          `   message_id: ${sent.message_id}`,
+          `   sent_at:    ${sent.sent_at.toISOString()}`,
+          "",
+          `The chef's reply will be injected into this session as a user message when it arrives — you'll see a '📬 Reply from ${chef.handle}...' prompt and a new turn will kick off automatically. No need to poll or wait synchronously.`,
+        ];
+        return toolOk(lines.join("\n"));
       } catch (err) {
         if (err instanceof AmqMissingError) return toolError(err.message);
-        if (err instanceof ConsultTimeoutError) {
-          return toolError(
-            `${err.message}\n\nYou can:\n  - Run \`pi-chefs status ${chef.name}\` in a shell to see if the chef is alive.\n  - Spawn it: \`pi-chefs spawn ${chef.name}\`.\n  - Retry the consult once it's up.`,
-          );
-        }
         return toolError(`consult failed: ${(err as Error).message}`);
       }
     },
