@@ -9,11 +9,11 @@
 
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createInterface, type Interface as Readline } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { stringify as yamlStringify } from "yaml";
-import { userPersonasDir, userRegistryDir } from "./paths.ts";
+import { callerConfigFile, userPersonasDir, userRegistryDir } from "./paths.ts";
 
 const HANDLE_RE = /^[a-z0-9_-]+$/;
 // Pi's built-in core tools — always available regardless of extension setup.
@@ -284,6 +284,109 @@ export async function runWizard(): Promise<void> {
     console.log("");
     console.log("Next:");
     console.log(`  pi-chefs spawn ${name}`);
+  } finally {
+    rl.close();
+  }
+}
+
+/**
+ * `pi-chefs init-caller` wizard. Walks the user through generating the
+ * caller-side discipline config at $PI_CHEFS_HOME/caller.yaml. Same shape
+ * as `runWizard()` but for the caller's allowlist instead of a chef.
+ */
+export async function runCallerWizard(): Promise<void> {
+  const rl = createInterface({ input: stdin, output: stdout, terminal: true });
+  try {
+    console.log("🏛️  pi-chefs caller-config wizard");
+    console.log("");
+    console.log("This will create the caller-side config that controls which skills");
+    console.log("and tools your `pi-chefs caller` Pi sessions are allowed to load.");
+    console.log("The point of being restrictive: when the caller doesn't have a");
+    console.log("domain skill, it's forced to route domain questions through chefs.");
+    console.log("");
+
+    const installedSkills = detectInstalledSkills();
+    let skills_allowed: string[];
+    if (installedSkills.length === 0) {
+      console.log("No skills detected in ~/.pi/agent/skills/.");
+      const raw = await ask(rl, "Allowed caller skills (comma-separated, blank = pi-chefs only)", "");
+      skills_allowed = raw
+        ? raw.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean)
+        : ["pi-chefs", "pi-postman"];
+    } else {
+      console.log("Detected skills in ~/.pi/agent/skills/:");
+      installedSkills.forEach((s, i) => console.log(`  [${i + 1}] ${s}`));
+      console.log("");
+      console.log("For best discipline, allow only pi-chefs + pi-postman + truly cross-cutting");
+      console.log("skills (e.g. world-trees if you always need it). Domain-specific skills");
+      console.log("(data-portal, gworkspace, etc.) should belong to a chef instead.");
+      const piChefsIdx = installedSkills.indexOf("pi-chefs") + 1;
+      const piPostmanIdx = installedSkills.indexOf("pi-postman") + 1;
+      const defaultPicks = [piChefsIdx, piPostmanIdx].filter((n) => n > 0).join(",");
+      const raw = await ask(
+        rl,
+        `Pick allowed skills (comma-separated numbers)`,
+        defaultPicks,
+      );
+      skills_allowed = pickByIndex(raw, installedSkills);
+      if (skills_allowed.length === 0) {
+        // Fall back to baseline rather than producing an unusable caller.
+        skills_allowed = ["pi-chefs", "pi-postman"];
+      }
+    }
+
+    console.log("");
+    console.log("Pi's default tool set is: read, bash, edit, write, grep, find, ls");
+    const toolsRaw = await ask(
+      rl,
+      "Tool allowlist (comma-separated, blank = use Pi default)",
+      "",
+    );
+    const tools_allowed = toolsRaw
+      ? toolsRaw.split(/[,\s]+/).map((t) => t.trim()).filter(Boolean)
+      : [];
+
+    console.log("");
+    const extensionsRaw = await ask(
+      rl,
+      "Extra extensions (absolute paths, comma-separated, blank for none)",
+      "",
+    );
+    const extensions_extra = extensionsRaw
+      ? extensionsRaw.split(/[,\s]+/).map((e) => e.trim()).filter(Boolean)
+      : [];
+
+    console.log("");
+    console.log("Configuration:");
+    console.log(`  skills_allowed:    ${skills_allowed.join(", ")}`);
+    console.log(`  tools_allowed:     ${tools_allowed.join(", ") || "(Pi default)"}`);
+    console.log(`  extensions_extra:  ${extensions_extra.join(", ") || "(none)"}`);
+    console.log("");
+
+    const path = callerConfigFile();
+    if (existsSync(path)) {
+      const overwrite = await askYesNo(rl, `Caller config already exists at ${path}. Overwrite?`, false);
+      if (!overwrite) {
+        console.log("Aborted.");
+        return;
+      }
+    }
+    const confirm = await askYesNo(rl, `Write caller config to ${path}?`, true);
+    if (!confirm) {
+      console.log("Aborted.");
+      return;
+    }
+
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(
+      path,
+      yamlStringify({ skills_allowed, tools_allowed, extensions_extra }),
+    );
+    console.log("");
+    console.log(`✓ Wrote ${path}`);
+    console.log("");
+    console.log("Next:");
+    console.log("  pi-chefs caller             # launch a discipline-enabled Pi session");
   } finally {
     rl.close();
   }

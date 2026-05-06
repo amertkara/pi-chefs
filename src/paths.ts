@@ -50,6 +50,15 @@ export function spawnMetaFile(chefName: string): string {
 }
 
 /**
+ * Caller-side config: declares which skills/tools the caller-mode Pi session
+ * is allowed to load. Read by `pi-chefs caller`. Optional — if missing, the
+ * caller spawns with a minimal default (just pi-postman + pi-chefs).
+ */
+export function callerConfigFile(): string {
+  return join(chefsHome(), "caller.yaml");
+}
+
+/**
  * Resolve the repo root. Works whether pi-chefs is run from a clone, from a
  * pnpm install, or from the bundled bin script.
  */

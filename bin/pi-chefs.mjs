@@ -4,6 +4,10 @@
  *
  * Subcommands:
  *   pi-chefs init                  Interactive wizard: create a new chef
+ *   pi-chefs init-caller           Wizard to create the caller-side discipline
+ *                                  config (~/.pi/chefs/caller.yaml)
+ *   pi-chefs caller [--dry-run]    Launch a Pi session as a caller, with the
+ *                                  caller config's skill+tool allowlist applied
  *   pi-chefs list                  List registered chefs
  *   pi-chefs status [<name>]       Show running status (all chefs, or one)
  *   pi-chefs spawn <name>          Launch the chef as a long-running Pi session
@@ -49,6 +53,7 @@ const REPO_ROOT = pathResolve(HERE, "..");
 const SRC_REGISTRY = pathToFileURL(join(REPO_ROOT, "dist", "registry.js")).href;
 const SRC_PATHS = pathToFileURL(join(REPO_ROOT, "dist", "paths.js")).href;
 const SRC_WIZARD = pathToFileURL(join(REPO_ROOT, "dist", "wizard.js")).href;
+const SRC_CALLER = pathToFileURL(join(REPO_ROOT, "dist", "caller.js")).href;
 // Resolve the pi-postman extension path. Order:
 //   1. PI_POSTMAN_PATH env (manual override; useful for dev clones).
 //   2. `pi-postman` binary on $PATH — invoke `pi-postman extension-path` to
@@ -154,6 +159,12 @@ async function main() {
     case "init":
       await cmdInit();
       break;
+    case "init-caller":
+      await cmdInitCaller();
+      break;
+    case "caller":
+      await cmdCaller(rest);
+      break;
     case "list":
       await cmdList();
       break;
@@ -193,6 +204,8 @@ function printHelp() {
 
 Usage:
   pi-chefs init                       Interactive wizard: create a new chef
+  pi-chefs init-caller                Wizard to create the caller-side config
+  pi-chefs caller [--dry-run]         Launch a discipline-enabled caller Pi session
   pi-chefs list                       List registered chefs
   pi-chefs status [<name>]            Show running status
   pi-chefs spawn <name> [--dry-run]   Launch a chef
@@ -213,6 +226,83 @@ Env:
 async function cmdInit() {
   const { runWizard } = await import(SRC_WIZARD);
   await runWizard();
+}
+
+async function cmdInitCaller() {
+  const { runCallerWizard } = await import(SRC_WIZARD);
+  await runCallerWizard();
+}
+
+/**
+ * Launch a Pi caller session with the caller-side discipline lever applied.
+ * Reads ~/.pi/chefs/caller.yaml (or its hard-coded fallback), strips Pi's
+ * skill auto-discovery (--no-skills), then explicitly loads only the skills
+ * the caller config allowlists.
+ *
+ * The caller is the inverse of `spawn`: spawn launches a chef that *receives*
+ * consults; caller launches a session that *issues* them. Both apply the
+ * same discipline pattern (allowlist skills + tools), just with different
+ * configs.
+ */
+async function cmdCaller(args) {
+  const dryRun = args.includes("--dry-run");
+  const piCommand = resolvePiCommand();
+  const { loadCallerConfig } = await import(SRC_CALLER);
+  const config = loadCallerConfig();
+
+  const piChefsExtensionPath = PI_CHEFS_EXT;
+  if (!existsSync(POSTMAN_DEFAULT)) {
+    console.error(`pi-chefs caller: pi-postman extension not found at ${POSTMAN_DEFAULT}`);
+    console.error(`Set PI_POSTMAN_PATH or install pi-postman.`);
+    process.exit(1);
+  }
+
+  const piArgs = [
+    "--extension",
+    POSTMAN_DEFAULT,
+    "--extension",
+    piChefsExtensionPath,
+  ];
+  for (const ext of config.extensions_extra) {
+    piArgs.push("--extension", ext);
+  }
+
+  // Same discipline lever as `spawn`: --no-skills strips auto-discovery,
+  // then we explicitly load only the allowlisted skills as absolute paths.
+  piArgs.push("--no-skills");
+  for (const skill of config.skills_allowed) {
+    const resolved = resolveSkillPath(skill);
+    if (!existsSync(resolved)) {
+      console.error(
+        `pi-chefs caller: skill "${skill}" not found at ${resolved}. ` +
+          `Install it under ~/.pi/agent/skills/<name>/ or update ~/.pi/chefs/caller.yaml.`,
+      );
+      process.exit(1);
+    }
+    piArgs.push("--skill", resolved);
+  }
+
+  if (config.tools_allowed.length > 0) {
+    piArgs.push("--tools", config.tools_allowed.join(","));
+  }
+
+  if (dryRun) {
+    console.log("pi-chefs caller --dry-run: resolved config");
+    console.log("");
+    console.log(`  skills_allowed:    ${config.skills_allowed.join(", ")}`);
+    console.log(`  tools_allowed:     ${config.tools_allowed.join(", ") || "(Pi default)"}`);
+    console.log(`  extensions_extra:  ${config.extensions_extra.join(", ") || "(none)"}`);
+    console.log("");
+    console.log(`  command:           ${piCommand.bin} ${[...piCommand.prefixArgs, ...piArgs].map(quote).join(" ")}`);
+    return;
+  }
+
+  const child = spawn(piCommand.bin, [...piCommand.prefixArgs, ...piArgs], {
+    cwd: process.cwd(),
+    stdio: "inherit",
+    env: process.env,
+  });
+  child.on("exit", (code) => process.exit(code ?? 0));
 }
 
 async function cmdList() {

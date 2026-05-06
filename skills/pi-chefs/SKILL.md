@@ -1,21 +1,32 @@
 ---
 name: pi-chefs
-description: "Consult an expert Pi session (a 'chef') for domain-specific questions. Use when the user wants to 'ask the data chef', 'consult chef-X', 'check with the rails chef', etc., or when a question requires deep domain expertise outside your current skill set. The chef does its own investigation in its own context and replies with a distilled answer."
+description: "Route domain-specific questions to expert Pi sessions ('chefs') instead of answering directly. **Before doing any non-trivial domain investigation** (data, infrastructure, frontend patterns, build systems, internal tooling, etc.), call `consult_list` to see if a chef covers that domain — if yes, consult the chef rather than reaching for your own tools. Triggers: any domain-shaped question (data, performance, code patterns, dashboards, metrics), explicit user requests ('ask the data chef', 'consult chef-X'), or any time the agent's about to do a multi-tool investigation in someone else's specialty area. The chef does the work in its own context and replies with a distilled answer, keeping the caller's context clean."
 ---
 
 # pi-chefs
 
 You can consult expert Pi sessions ("chefs") that specialize in narrow domains. Each chef runs in its own Pi session with its own context, skills, and tools. Use them when a question is genuinely outside your zone of expertise — or when pulling in a domain skill would poison your context with investigation noise.
 
+## Default behavior: route first, investigate later
+
+When the user asks a domain-shaped question (data, infrastructure, performance, frontend, build system, internal tooling, etc.), your **first move** should be `consult_list`. If a chef covers that domain, route the question there — even if you happen to have a skill or tool that could partially answer it. The whole point of chefs is that they have *deep* context in their domain, while you have *broad* but shallow context.
+
+Do not reach for `data_portal_*`, `bigquery_*`, or any other domain tool *before* checking `consult_list`. Skip the chef only when:
+
+- The question is generic and not domain-shaped ("what does this regex match?", "refactor this loop").
+- No chef covers the domain (you checked `consult_list` and there's no fit).
+- The user explicitly tells you to investigate yourself ("don't consult, just look it up").
+
 ## When to use
 
 **Yes:**
-- The question requires a skill or toolchain you don't currently have loaded → consult the chef whose domain covers it.
-- You need a domain-specific lookup (a table name, a convention, a precedent) without taking on the full domain skillset.
+- A domain-shaped question where a chef's `domain` description matches.
+- The question requires a skill or toolchain you don't currently have loaded.
 - The investigation will involve many tool calls, but the answer fits in a paragraph.
+- You need a domain-specific lookup (a table name, a convention, a precedent) without taking on the full domain skillset.
 
 **No:**
-- You can answer in 1-2 turns with the tools you already have.
+- You can answer in 1-2 turns with truly generic tools (read, edit a single file, look up a regex).
 - The question is open-ended or strategic ("what should we build next") — chefs are good at narrow factual/technical questions, not roadmap calls.
 - You're already mid-flow on a task and the question is a tangent — finish the current task first, then consult.
 
