@@ -47,10 +47,6 @@ jobs:
             exit 1
           fi
 
-      - name: Upgrade npm to a version that supports Trusted Publishing
-        # OIDC trusted publishing requires npm >=11.5.1; the runner ships ~10.x.
-        run: npm install -g npm@latest
-
       - name: Install dependencies
         run: |
           corepack enable
@@ -60,6 +56,11 @@ jobs:
         run: pnpm typecheck
 
       - name: Publish to npm
-        # No NODE_AUTH_TOKEN — npm CLI exchanges the GitHub Actions OIDC token
-        # with the npm registry directly when Trusted Publisher is configured.
-        run: npm publish --access public --provenance
+        # OIDC trusted publishing requires npm >=11.5.1; the runner ships
+        # ~10.x, and `npm install -g npm@latest` can't atomically swap the
+        # running npm's deps (MODULE_NOT_FOUND on promise-retry). Use npx to
+        # download a recent npm into a tempdir and run publish through it.
+        # No NODE_AUTH_TOKEN env: npm CLI exchanges the GitHub Actions OIDC
+        # token with the npm registry directly once Trusted Publisher is
+        # configured for the package on npmjs.org.
+        run: npx -y npm@latest publish --access public --provenance
