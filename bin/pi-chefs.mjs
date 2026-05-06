@@ -33,13 +33,14 @@ import {
   lstatSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   readlinkSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve as pathResolve } from "node:path";
+import { basename, dirname, join, resolve as pathResolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -60,15 +61,51 @@ function resolvePostmanPath() {
 
   // Ask the pi-postman CLI directly. This handles pnpm's content-addressable
   // virtual store layout where ../pi-postman doesn't resolve to anything.
+  // Augment PATH with common global bin dirs in case the parent shell didn't
+  // export them (e.g. when run from a wrapper that strips PATH).
+  const augmentedPath = [
+    process.env.PATH ?? "",
+    join(homedir(), ".local", "share", "pnpm"),
+    join(homedir(), ".local", "bin"),
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+  ]
+    .filter(Boolean)
+    .join(":");
   try {
     const out = execSync("pi-postman extension-path", {
       stdio: ["ignore", "pipe", "ignore"],
       encoding: "utf8",
+      env: { ...process.env, PATH: augmentedPath },
     }).trim();
     if (out && existsSync(out)) return out;
   } catch {
     // pi-postman not on PATH — fall through to filesystem heuristics.
   }
+
+  // For pnpm-global installs, both pi-postman and pi-chefs end up under
+  // ~/.local/share/pnpm/global/<gen>/.pnpm/<pkg>@<ver>_.../node_modules/<pkg>/.
+  // Walk up from REPO_ROOT looking for any sibling pi-postman dir.
+  // Path shape: .../<store>/.pnpm/pi-chefs@.../node_modules/pi-chefs
+  // We want:    .../<store>/.pnpm/pi-postman@.../node_modules/pi-postman
+  const pnpmStoreCandidate = (() => {
+    // REPO_ROOT = .../node_modules/pi-chefs ; go up to .../node_modules
+    const nodeModulesDir = pathResolve(REPO_ROOT, "..");
+    if (basename(nodeModulesDir) !== "node_modules") return undefined;
+    // Up to the .pnpm/<this-pkg>@... dir, then up to .pnpm/.
+    const dotPnpmDir = pathResolve(nodeModulesDir, "..", "..");
+    if (basename(dotPnpmDir) !== ".pnpm") return undefined;
+    // List entries; find one starting with 'pi-postman@'.
+    let entries;
+    try {
+      entries = readdirSync(dotPnpmDir);
+    } catch {
+      return undefined;
+    }
+    const match = entries.find((e) => e.startsWith("pi-postman@"));
+    if (!match) return undefined;
+    return join(dotPnpmDir, match, "node_modules", "pi-postman", "extension", "pi-postman.ts");
+  })();
 
   const candidates = [
     // Dev clone next to pi-chefs source.
@@ -77,6 +114,8 @@ function resolvePostmanPath() {
     pathResolve(REPO_ROOT, "..", "node_modules", "pi-postman", "extension", "pi-postman.ts"),
     // Nested install (pi-chefs has pi-postman as its own dep).
     pathResolve(REPO_ROOT, "node_modules", "pi-postman", "extension", "pi-postman.ts"),
+    // pnpm-global virtual store sibling (resolved above).
+    ...(pnpmStoreCandidate ? [pnpmStoreCandidate] : []),
   ];
   for (const c of candidates) {
     if (existsSync(c)) return c;
