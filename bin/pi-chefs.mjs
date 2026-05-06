@@ -282,8 +282,25 @@ async function cmdCaller(args) {
     piArgs.push("--skill", resolved);
   }
 
+  // Same framework-tool augmentation as `spawn` — see comment there. Without
+  // this, --tools strips consult / postman_* and the caller can't issue
+  // consults at all.
   if (config.tools_allowed.length > 0) {
-    piArgs.push("--tools", config.tools_allowed.join(","));
+    const FRAMEWORK_TOOLS_CALLER = [
+      "postman_send",
+      "postman_inbox",
+      "postman_read",
+      "postman_reply",
+      "postman_sessions",
+      "postman_thread",
+      "consult",
+      "consult_list",
+      "chef_info",
+    ];
+    const merged = Array.from(
+      new Set([...config.tools_allowed, ...FRAMEWORK_TOOLS_CALLER]),
+    );
+    piArgs.push("--tools", merged.join(","));
   }
 
   if (dryRun) {
@@ -450,11 +467,28 @@ async function cmdSpawn(args) {
     // beyond what its persona declares. This keeps the spawn deterministic.
     piArgs.push("--no-skills");
   }
-  // Tools allowlist is a single comma-separated --tools flag (not repeatable).
-  // Built-in tools recognized by Pi: read, bash, edit, write, grep, find, ls.
-  // If the chef has no tools_allowed, fall back to the Pi default (no flag).
+  // Tools allowlist: comma-separated --tools flag (not repeatable).
+  // Critical: Pi's --tools filters ALL tools, including extension-registered
+  // ones. So if we pass --tools write,edit,find we'd strip the postman_* and
+  // consult tools — the chef would receive mail and have no way to read it.
+  // Always include the framework tools when --tools is set.
   if (chef.tools_allowed.length > 0) {
-    piArgs.push("--tools", chef.tools_allowed.join(","));
+    const FRAMEWORK_TOOLS = [
+      // pi-postman registers these.
+      "postman_send",
+      "postman_inbox",
+      "postman_read",
+      "postman_reply",
+      "postman_sessions",
+      "postman_thread",
+      // pi-chefs registers these. consult_list + chef_info appear depending
+      // on session role; harmless to include both for either side.
+      "consult",
+      "consult_list",
+      "chef_info",
+    ];
+    const merged = Array.from(new Set([...chef.tools_allowed, ...FRAMEWORK_TOOLS]));
+    piArgs.push("--tools", merged.join(","));
   }
 
   if (dryRun) {
