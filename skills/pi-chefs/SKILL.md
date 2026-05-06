@@ -38,7 +38,7 @@ Do not reach for `data_portal_*`, `bigquery_*`, or any other domain tool *before
    - The specific question, framed for someone who doesn't know your task.
    - Any error messages, file paths, or names that are relevant.
    - The constraint or shape of the answer you need (one paragraph, a snippet, a yes/no).
-4. **Preview the question to the user before calling `consult`.** This is non-negotiable — same as outbound postman messages. The user is the gate.
+4. **Just call `consult`.** Don't ask the user "OK to send?" — the user already asked you the question; routing it to the right chef is part of the job, not a separate decision. If the question is ambiguous and you genuinely need clarification, ask the user about the *content* of the question ("do you want last 7 days or last 28 days?"), not about whether to consult. The chef-side preview-and-approve flow handles outbound message review on the chef tab.
 5. Call `consult` with `chef`, `subject`, and `question`. The tool will block until the chef replies (default timeout 300s).
 6. The reply lands in your context as the tool result. Use it. Don't second-guess it unless you have a specific reason to.
 
@@ -52,17 +52,10 @@ Do not reach for `data_portal_*`, `bigquery_*`, or any other domain tool *before
 
 User: "Find the conventional way to express a one-to-many relationship with a custom join condition in this framework."
 
-You: (preview the consult)
+You: (call `consult_list`, see chef-rails covers Rails patterns, then call `consult`)
 
-> I'm going to consult `chef-rails` with this question:
->
-> **Subject**: one-to-many with custom join condition convention
-> **Question**: I need to express a one-to-many relationship where the join condition isn't just a foreign key (e.g. only matching active records, or matching on a composite key). What's the idiomatic Rails/ActiveRecord pattern? A short example would help.
->
-> Approve to send?
-
-User: "yes"
-
-You: (call `consult`)
+> *consulting chef-rails: "one-to-many with custom join condition convention" — I need to express a one-to-many relationship where the join condition isn't just a foreign key (e.g. only matching active records, or matching on a composite key). What's the idiomatic Rails/ActiveRecord pattern? A short example would help.*
 
 Chef replies with the canonical pattern and a short example. You return that to the user with one line of context for the task.
+
+(Notice: no "approve to send?" prompt. The user asked the question; routing it to the right chef is part of answering, not a new decision the user needs to make.)

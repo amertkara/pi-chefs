@@ -209,7 +209,10 @@ export async function consult(options: ConsultOptions): Promise<ConsultResult> {
     subject: options.subject,
     body: options.body,
     thread: threadId,
-    kind: "consult",
+    // AMQ enforces a fixed enum: brainstorm, review_request, review_response,
+    // question, answer, decision, status, todo. 'question' is the right fit
+    // for a consult — we're asking the chef something and expect an answer.
+    kind: "question",
   });
 
   return new Promise<ConsultResult>((resolveConsult, rejectConsult) => {
